@@ -6,8 +6,15 @@ import {randomUUID,randomBytes} from 'node:crypto';
 const invalidState=()=>new Error('Hosted checks require complete closed AWS staging state.');
 function targets(state){
   const domain=state?.outputs?.CloudFrontDomain,endpoint=state?.outputs?.ApiEndpoint;
-  if(state?.launchOpen!==false||state?.parameters?.LaunchOpen!=='false'||state?.parameters?.DataMode!=='sample'||typeof domain!=='string'||!(/^[a-z0-9-]+\.cloudfront\.net$/).test(domain)||typeof endpoint!=='string'||!(/^https:\/\/[a-z0-9-]+\.execute-api\.[a-z0-9-]+\.amazonaws\.com(?:\/[A-Za-z0-9_-]+)?\/?$/).test(endpoint)||typeof state?.stagingAccess!=='string'||!(/^Basic [A-Za-z0-9+/]{20,}={0,2}$/).test(state.stagingAccess)||typeof state?.runtime?.jobSecret!=='string'||state.runtime.jobSecret.length<32)throw invalidState();
-  return{site:'https://'+domain,api:endpoint.replace(/\/$/,'')};
+  if(state?.launchOpen!==false||state?.parameters?.LaunchOpen!=='false'||state?.parameters?.DataMode!=='sample'||typeof endpoint!=='string'||!(/^https:\/\/[a-z0-9-]+\.execute-api\.[a-z0-9-]+\.amazonaws\.com(?:\/[A-Za-z0-9_-]+)?\/?$/).test(endpoint)||typeof state?.stagingAccess!=='string'||!(/^Basic [A-Za-z0-9+/]{20,}={0,2}$/).test(state.stagingAccess)||typeof state?.runtime?.jobSecret!=='string'||state.runtime.jobSecret.length<32)throw invalidState();
+  const api=endpoint.replace(/\/$/,'');
+  if(state.parameters.FreeGatewayHosting!=='false'){
+    const site=state.outputs.PublicGatewayOrigin;
+    if(typeof site!=='string'||site.replace(/\/$/,'')!==api)throw invalidState();
+    return{site:api,api,topology:'gateway'};
+  }
+  if(typeof domain!=='string'||!(/^[a-z0-9-]+\.cloudfront\.net$/).test(domain))throw invalidState();
+  return{site:'https://'+domain,api,topology:'cloudfront'};
 }
 const failure=code=>Object.assign(new Error('Hosted verification failed.'),{code});
 const noStore=response=>/(?:^|,)\s*no-store(?:\s|,|$)/i.test(response.headers.get('cache-control')||'');
@@ -30,7 +37,7 @@ function secureDeletion(response){
 
 /** GET-only by default. Synthetic auth probes require an explicit option and never use a real email. */
 export async function checkAwsHosted({state,fetchImpl=globalThis.fetch,authProbes=false,now=()=>new Date(),randomId=randomUUID,timeoutMs=15000}={}){
-  const{site,api}=targets(state);
+  const{site,api,topology}=targets(state);
   if(typeof fetchImpl!=='function'||typeof authProbes!=='boolean'||!Number.isFinite(timeoutMs)||timeoutMs<1||timeoutMs>120000)throw invalidState();
   const checkedAt=now().toISOString();
   const secrets=[state.stagingAccess,...Object.values(state.runtime||{}).filter(value=>typeof value==='string'&&value.length>=8)];
@@ -64,9 +71,10 @@ export async function checkAwsHosted({state,fetchImpl=globalThis.fetch,authProbe
     check('public-site-gate',site,{},response=>[401,403].includes(response.status)&&noStore(response)&&noCookie(response)),
     check('public-api-gate',site+'/api/config',{},response=>[401,403].includes(response.status)&&noStore(response)&&noCookie(response)),
     check('gated-site',site+'/',{headers:gated},(response,text)=>{siteResponse=response;return response.status===200&&/^text\/html\b/i.test(response.headers.get('content-type')||'')&&/Beter/i.test(text)&&noCookie(response);}),
+    check('static-app-module',site+'/app.js',{headers:gated},(response,text)=>response.status===200&&/^(?:text|application)\/javascript\b/i.test(response.headers.get('content-type')||'')&&/(?:^|\n)\s*import\b/.test(text)&&response.headers.get('x-content-type-options')?.toLowerCase()==='nosniff'&&noCookie(response)),
     check('aws-sample-configuration',site+'/api/config',{headers:browser},(response,text)=>{const value=jsonBody(response,text);return response.status===200&&value.mode==='aws'&&value.dataMode==='sample'&&value.liveOddsConfigured===false&&noStore(response)&&noCookie(response);}),
     check('public-health',site+'/api/health',{headers:browser},(response,text)=>{const value=jsonBody(response,text);return response.status===200&&value.ok===true&&value.service==='beter-api'&&noStore(response)&&noCookie(response);}),
-    check('direct-api-blocked',api+'/api/health',{},response=>response.status===403&&noStore(response)&&noCookie(response)),
+    check(topology==='gateway'?'direct-api-gate':'direct-api-blocked',api+'/api/health',{},response=>(topology==='gateway'?[401,403].includes(response.status):response.status===403)&&noStore(response)&&noCookie(response)),
     check('private-health-gate',site+'/api/health/details',{headers:gated},response=>response.status===403&&noStore(response)&&noCookie(response)),
     check('private-health',site+'/api/health/details',{headers:{...gated,authorization:'Bearer '+state.runtime.jobSecret}},(response,text)=>{const value=jsonBody(response,text);return response.status===200&&Number(value.schema_version)>=4&&value.ledger_mismatches===0&&value.unsettled_bets===0&&noStore(response)&&noCookie(response);}),
     check('anonymous-session',site+'/api/auth/session',{headers:browser},(response,text)=>response.status===200&&jsonBody(response,text).session===null&&noStore(response)&&noCookie(response)),
@@ -81,7 +89,7 @@ export async function checkAwsHosted({state,fetchImpl=globalThis.fetch,authProbe
     checks.push(await check('nonexistent-signin',site+'/api/auth/signin',options,(response,text)=>response.status===401&&safeAuthError(response,text,'AUTH_FAILED','Sign in failed. Check your details or confirm your email.')&&noStore(response)&&noCookie(response)));
     checks.push(await check('closed-signup',site+'/api/auth/signup',options,(response,text)=>response.status===403&&safeAuthError(response,text,'SIGNUP_UNAVAILABLE','Account registration is not available. Contact support or try again later.')&&noStore(response)&&noCookie(response)));
   }
-  return{ok:checks.every(check=>check.ok),scope:'closed-staging',publicLaunchReady:false,authProbes,checkedAt,checks};
+  return{ok:checks.every(check=>check.ok),scope:'closed-staging',topology,publicLaunchReady:false,authProbes,checkedAt,checks};
 }
 
 export async function checkAwsHostedFromState({statePath=resolve('.data/aws-deploy/state.json'),readState=path=>readFile(path,'utf8'),...options}={}){
