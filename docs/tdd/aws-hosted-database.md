@@ -19,3 +19,5 @@ Fixtures have unique generated identifiers and synthetic `example.invalid` email
 - `node --check tests/aws-hosted-database.integration.mjs` passed.
 
 **No AWS execution has been performed by the author at this checkpoint.** Retain the actual hosted command result separately before treating these guarantees as proven on Aurora. The template/runtime review found the role and secret mappings compatible; actual managed role behavior, engine compatibility, cold start timing, IAM, and backup recovery require hosted evidence.
+
+An actual AWS deployment exposed managed master secret names beginning with `rds!cluster-`. The dedicated regression was RED5/6 in `b653a79` and GREEN6/6 in `d528042` after the hosted-only validator accepted `!` in secret names. App runtime configuration did not change. `node --test tests/aws-hosted-database.test.mjs` now has6 passing safety tests and still performs no cloud calls.

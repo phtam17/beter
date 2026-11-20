@@ -81,6 +81,8 @@ Primary references: [PostgreSQL verifier format](https://www.postgresql.org/docs
 
 Post-hardening focused verification: **32 passed,0 failed,0 skipped** using the original database/bootstrap/direct/migration coverage command. Combined coverage: **98.89% lines /87.73% branches /94.83% functions**. `npx tsc --noEmit` passed.
 
+The optional direct PostgreSQL fallback also rejects all URL query parameters. A localhost authority with `?host=remote` otherwise lets the driver's parsed host override the loopback transport exemption. `a36d740` captured RED4/5; the fix passed all19 direct/database/hosted-safety tests plus TypeScript. Host, hostaddr, service, port, user, password, database, options, and other query overrides are refused before constructing a pool. This does not change the deployed Data API path.
+
 `aws/sql/finalize.sql` wraps normal maintenance with bounded removal of expired private sessions and historical access-hash lineage. It preserves active refresh families and the short replay grace. Bootstrap and financial migrations are immutable after application; subsequent changes need a new reviewed migration.
 
 ## Sources and limits
