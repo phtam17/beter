@@ -84,6 +84,14 @@ export function createApiClient(options={}) {
       return {session:payload.session?structuredClone(activeSession):null,...(payload.user?{user:activeSession?.user??{id:payload.user.id,...(typeof payload.user.email==='string'?{email:payload.user.email}:{})}}:{}),...(payload.requiresConfirmation?{requiresConfirmation:true}:{})};
     }finally{if(generation===authGeneration)authController=null;}
   }
+  async function recoveryRequest(path,body) {
+    cancelAuthentication();const generation=authGeneration,controller=new AbortController();authController=controller;
+    try{
+      const payload=await request(path,{method:'POST',body,signal:controller.signal});
+      if(generation!==authGeneration)throw aborted();
+      return payload;
+    }finally{if(generation===authGeneration)authController=null;}
+  }
   function signout(){
     if(logoutRequest)return logoutRequest;
     cancelAuthentication();activeSession=null;pendingLogout=true;persistentLogout=false;
@@ -104,7 +112,8 @@ export function createApiClient(options={}) {
     signup:(email,password)=>authenticate('/auth/signup',email,password),
     signin:(email,password)=>authenticate('/auth/signin',email,password),
     signout,
-    recover:email=>request('/auth/recover',{method:'POST',body:{email}}),
+    recover:email=>recoveryRequest('/auth/recover',{email}),
+    confirmRecovery:(email,code,password)=>recoveryRequest('/auth/confirm',{email,code,password}),
     updatePassword:(password,accessToken)=>request('/auth/password',{method:'POST',body:{password},authenticated:accessToken===undefined,accessToken}),
     portfolio:()=>request('/portfolio',{authenticated:true}),
     async history(portfolioId,{before=null,limit=100,status=null,signal}={}){
