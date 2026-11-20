@@ -185,6 +185,13 @@
       "MinValue": 60,
       "MaxValue": 10800,
       "Description": "Shared sample event duration from fixed start through settlement, bounded to three hours. Ignored by live provider."
+    },
+    "SampleRepeatSeconds": {
+      "Type": "Number",
+      "Default": 21600,
+      "MinValue": 600,
+      "MaxValue": 86400,
+      "Description": "Private staging sample round interval in seconds; runtime requires at least duration plus 60 seconds. Ignored by live provider."
     }
   },
   "Rules": {
@@ -1586,6 +1593,17 @@
             },
             "BETER_SUPPORT_TOPIC_ARN": {
               "Ref": "NotificationTopic"
+            },
+            "BETER_SAMPLE_REPEAT_SECONDS": {
+              "Fn::If": [
+                "IsSampleData",
+                {
+                  "Ref": "SampleRepeatSeconds"
+                },
+                {
+                  "Ref": "AWS::NoValue"
+                }
+              ]
             }
           }
         },
@@ -1730,6 +1748,17 @@
             },
             "BETER_SUPPORT_TOPIC_ARN": {
               "Ref": "NotificationTopic"
+            },
+            "BETER_SAMPLE_REPEAT_SECONDS": {
+              "Fn::If": [
+                "IsSampleData",
+                {
+                  "Ref": "SampleRepeatSeconds"
+                },
+                {
+                  "Ref": "AWS::NoValue"
+                }
+              ]
             }
           }
         },
@@ -1892,6 +1921,17 @@
             },
             "BETER_SUPPORT_TOPIC_ARN": {
               "Ref": "NotificationTopic"
+            },
+            "BETER_SAMPLE_REPEAT_SECONDS": {
+              "Fn::If": [
+                "IsSampleData",
+                {
+                  "Ref": "SampleRepeatSeconds"
+                },
+                {
+                  "Ref": "AWS::NoValue"
+                }
+              ]
             }
           }
         },
