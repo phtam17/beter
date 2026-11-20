@@ -167,7 +167,11 @@ export function createCognitoAuthBackend({region,clientId,store,secret,client,no
       }
       if(action==='signup'){
         const nextPassword=password(body.password);
-        try{await invoke(new SignUpCommand({ClientId:clientId,Username:email,Password:nextPassword,UserAttributes:[{Name:'email',Value:email}]}),deadline);}catch(error){if((error as {name?:unknown})?.name!=='UsernameExistsException')throw error;}
+        try{await invoke(new SignUpCommand({ClientId:clientId,Username:email,Password:nextPassword,UserAttributes:[{Name:'email',Value:email}]}),deadline);}catch(error){
+          const name=(error as {name?:unknown})?.name;
+          if(name==='UserLambdaValidationException')throw new ApiFault(403,'SIGNUP_UNAVAILABLE','Account registration is not available. Contact support or try again later.');
+          if(name!=='UsernameExistsException')throw error;
+        }
         return{session:null,requiresConfirmation:true};
       }
       if(action!=='signin')throw new ApiFault(400,'INVALID_AUTH_ACTION','Choose a valid account action.');
