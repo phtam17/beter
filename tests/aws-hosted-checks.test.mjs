@@ -97,3 +97,15 @@ test('private state loading errors are safe and never start a partial check run'
   for(const readState of [async()=>{throw Error('private path and account');},async()=>'{"private":"unterminated'])await assert.rejects(()=>module.checkAwsHostedFromState({readState,fetchImpl:async()=>{calls++;}}),error=>error.message==='Private AWS deployment state is unavailable or invalid.');
   assert.equal(calls,0);
 });
+
+test('provider diagnostics or unexpected session fields cannot pass safe anonymous auth probes',async()=>{
+  const f=fixture(async(url,init,next)=>{
+    if(url.endsWith('/auth/signin'))return json({error:{code:'AUTH_FAILED',message:'UserNotFoundException: private provider response'},session:{access_token:'unsafe-provider-token'}},401);
+    if(url.endsWith('/auth/signup'))return json({error:{code:'SIGNUP_UNAVAILABLE',message:'UserLambdaValidationException: private allowlist'}},403);
+    return next(url,init);
+  });
+  const result=await f.run({authProbes:true});
+  assert.equal(result.checks.find(check=>check.name==='nonexistent-signin').ok,false);
+  assert.equal(result.checks.find(check=>check.name==='closed-signup').ok,false);
+  assert.ok(!JSON.stringify(result).includes('unsafe-provider-token'));
+});
