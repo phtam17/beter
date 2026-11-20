@@ -136,3 +136,6 @@ test('a successful HTML response cannot hide a missing or incorrectly typed scri
     const result=await f.run();assert.equal(result.ok,false);assert.equal(result.checks.find(check=>check.name==='static-app-module')?.ok,false);
   }
 });
+test('inspection serializes requests for a small AWS account and preserves real service failures',async()=>{
+ let active=0,peak=0;const f=fixture(async(url,init,normal)=>{active++;peak=Math.max(peak,active);try{await new Promise(r=>setTimeout(r,2));return new URL(url).pathname==='/api/health'?json({error:{code:'BACKEND_UNAVAILABLE'}},503):normal(url,init);}finally{active--;}});const result=await f.run({requestIntervalMs:0});assert.equal(peak,1);assert.equal(result.ok,false);assert.equal(result.checks.find(x=>x.name==='public-health').status,503);assert.equal(f.calls.length,12);
+});
