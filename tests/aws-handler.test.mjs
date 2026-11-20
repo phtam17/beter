@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 const {createAwsHandler,preSignupHandler}=await import('../aws/handler.ts').catch(error=>{if(error.code==='ERR_MODULE_NOT_FOUND')return{};throw error;});
 const secret='origin-verification-fixture-1234567890';
 function fixture(options={}){
@@ -67,4 +68,24 @@ test('heartbeat metrics bypass Lambda console JSON wrapping and remain root-leve
   const handle=createAwsHandler({workerTask:'process',env:{BETER_ENVIRONMENT:'production'},getRuntime:async()=>({runJobs:async()=>({errors:0}),handle:async()=>Response.json({})})});
   assert.equal((await handle({source:'beter.scheduler',task:'process'})).ok,true);
   assert.equal(records.length,1);assert.equal(records[0]._aws?.CloudWatchMetrics[0].Namespace,'Beter');assert.deepEqual(records[0]._aws.CloudWatchMetrics[0].Dimensions,[['Environment']]);assert.equal(records[0].Environment,'production');assert.equal(records[0].WorkerSuccess,1);assert.equal(records[0].message,undefined);
+});
+
+const gatewayAccess='Basic '+Buffer.from('beter:private-gateway-access').toString('base64');
+const gatewayEnv=()=>({BETER_PUBLIC_GATEWAY:'true',BETER_STAGING_AUTH_HASH:createHash('sha256').update(gatewayAccess).digest('hex'),BETER_FUNDING_CUTOFF_AT:'2099-01-01T00:00:00'});
+test('public API gateway applies closed access and funding before runtime loading without an origin secret',async()=>{
+  let loads=0;const handle=createAwsHandler({env:gatewayEnv(),getRuntime:async()=>{loads++;return{settings:{siteUrl:'https://beter.example'},handle:async()=>Response.json({ok:true}),runJobs:async()=>({})};}});
+  for(const headers of [{},{authorization:'Basic wrong'},{'x-beter-staging-access':'wrong',authorization:gatewayAccess}])assert.equal((await handle(event({headers}))).statusCode,401);
+  assert.equal(loads,0);assert.equal((await handle(event({headers:{authorization:gatewayAccess}}))).statusCode,200);assert.equal(loads,1);
+  const expired=createAwsHandler({env:{...gatewayEnv(),BETER_FUNDING_CUTOFF_AT:'2000-01-01T00:00:00'},getRuntime:async()=>{throw Error('must not load');}});assert.equal((await expired(event({headers:{authorization:gatewayAccess}}))).statusCode,503);
+});
+test('public gateway strips only Basic gate credentials and uses actual API Gateway source metadata',async()=>{
+  const f=fixture({env:gatewayEnv()});
+  await f.handle(event({headers:{authorization:gatewayAccess,origin:'https://untrusted.example','x-beter-origin-secret':'spoofed','x-beter-viewer-ip':'198.51.100.7','x-beter-source-ip':'198.51.100.8','x-forwarded-for':'198.51.100.9'}}));
+  const request=f.requests[0];assert.ok(request);assert.equal(request.url,'https://beter.example/api/portfolio?a=b%3Dc');assert.equal(request.headers.get('authorization'),null);assert.equal(request.headers.get('x-beter-source-ip'),'203.0.113.2');assert.equal(request.headers.get('origin'),'https://untrusted.example');
+  for(const header of ['x-beter-origin-secret','x-beter-viewer-ip','x-beter-staging-access','x-forwarded-for'])assert.equal(request.headers.get(header),null);
+  await f.handle(event({headers:{authorization:'Bearer worker-private','x-beter-staging-access':gatewayAccess},cookies:['__Host-beter-session=opaque-cookie']}));assert.equal(f.requests[1].headers.get('authorization'),'Bearer worker-private');assert.equal(f.requests[1].headers.get('cookie'),'__Host-beter-session=opaque-cookie');
+});
+test('public gateway mode retains secure response headers and honors an explicit factory option',async()=>{
+  const f=fixture({publicGateway:true,env:gatewayEnv()});const response=await f.handle(event({headers:{authorization:gatewayAccess}}));assert.equal(response.statusCode,200);assert.equal(response.headers['x-frame-options'],'DENY');assert.match(response.headers['content-security-policy'],/frame-ancestors 'none'/);assert.match(response.headers['strict-transport-security'],/max-age=31536000/);
+  for(const headers of [{},{authorization:'Bearer worker-private'}]){const denied=await f.handle(event({headers}));assert.equal(denied.statusCode,401);assert.equal(denied.headers['cache-control'],'no-store');assert.match(denied.headers['www-authenticate'],/Basic/);}
 });
