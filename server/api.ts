@@ -94,16 +94,17 @@ function createBearerHandler(options: ApiOptions) {
         throw new ApiFault(405,'METHOD_NOT_ALLOWED','This method is not supported.');
       }
       if(path.startsWith('/auth/')&&method==='POST'){
-        const action=path.slice(6);if(!['signup','signin','refresh','signout','recover','password'].includes(action))throw new ApiFault(404,'NOT_FOUND','This endpoint does not exist.');
+        const action=path.slice(6);if(!['signup','signin','refresh','signout','recover','confirm','password'].includes(action))throw new ApiFault(404,'NOT_FOUND','This endpoint does not exist.');
         const body=await readBody(request);
         if(action==='password'){
           if(!token)throw new ApiFault(401,'AUTH_REQUIRED','A valid recovery or account session is required.');
           await backend.authenticate(token);
           if(typeof body.password!=='string'||body.password.length<10||body.password.length>200)throw new ApiFault(400,'INVALID_PASSWORD','Use a password with 10 to 200 characters.');
         }
-        if(['signup','signin','recover'].includes(action)){
+        if(['signup','signin','recover','confirm'].includes(action)){
           if(typeof body.email!=='string'||body.email.length>254||!/^\S+@\S+\.\S+$/.test(body.email))throw new ApiFault(400,'INVALID_EMAIL','Enter a valid email address.');
           body.email=body.email.trim().toLowerCase();
+          if(action==='confirm'&&(typeof body.code!=='string'||!/^\d{6}$/.test(body.code)))throw new ApiFault(400,'INVALID_CODE','Enter the six-digit verification code from your email.');
           if(action!=='recover'&&(typeof body.password!=='string'||body.password.length<10||body.password.length>200))throw new ApiFault(400,'INVALID_PASSWORD','Use a password with 10 to 200 characters.');
           if(options.authLimit){
             let limit;try{limit=await options.authLimit(request,action,String(body.email));}catch{throw new ApiFault(503,'LIMITS_UNAVAILABLE','Sign-in protection is temporarily unavailable. Please try again.');}

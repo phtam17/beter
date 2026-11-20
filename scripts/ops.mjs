@@ -14,7 +14,7 @@ export async function runOperatorCli(args,{env=process.env,fetchImpl=globalThis.
   const output=value=>writeOutput(JSON.stringify(value));
   const command=args[0];
   if(command==='help'||command==='--help'){
-    output({commands,configuration:['BETER_OPS_URL','JOB_SECRET'],usage:'check | status | resolve --file path | resume --file path | maintenance [--batch-size 1..1000]'});
+    output({commands,configuration:['BETER_OPS_URL','JOB_SECRET','BETER_STAGING_ACCESS (optional)'],usage:'check | status | resolve --file path | resume --file path | maintenance [--batch-size 1..1000]'});
     return 0;
   }
   let file,batchSize=1000;
@@ -56,7 +56,7 @@ export async function runOperatorCli(args,{env=process.env,fetchImpl=globalThis.
   const deadline=new Promise((_,reject)=>{timer=setTimeout(()=>{timedOut=true;controller.abort();reject(new Error());},timeoutMs);});
   try{
     const work=(async()=>{
-      const response=await fetchImpl(new URL('/api'+route,base).href,{method:body?'POST':'GET',headers:{Accept:'application/json',Authorization:'Bearer '+env.JOB_SECRET,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{}),signal:controller.signal});
+      const response=await fetchImpl(new URL('/api'+route,base).href,{method:body?'POST':'GET',headers:{Accept:'application/json',Authorization:'Bearer '+env.JOB_SECRET,...(env.BETER_STAGING_ACCESS?{'X-Beter-Staging-Access':env.BETER_STAGING_ACCESS}:{}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{}),signal:controller.signal});
       if(!response.ok&&!(command==='check'&&response.status===503))return{failed:true,status:response.status};
       const payload=await response.json();
       return{response,payload};
