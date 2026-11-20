@@ -172,6 +172,19 @@
         "false"
       ],
       "Description": "Use the AWS-generated HTTP API HTTPS hostname with TLS 1.2 minimum, no purchased domain required. The optional CloudFront distribution is disabled in this mode."
+    },
+    "SampleStartAt": {
+      "Type": "String",
+      "Default": "",
+      "AllowedPattern": "^$|^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+      "Description": "Fixed UTC start instant for isolated AWS sample events; set explicitly for staging sample checks. Ignored by live provider."
+    },
+    "SampleDurationSeconds": {
+      "Type": "Number",
+      "Default": 10800,
+      "MinValue": 60,
+      "MaxValue": 10800,
+      "Description": "Shared sample event duration from fixed start through settlement, bounded to three hours. Ignored by live provider."
     }
   },
   "Rules": {
@@ -1503,6 +1516,12 @@
             },
             "BETER_LAUNCH_OPEN": {
               "Ref": "LaunchOpen"
+            },
+            "BETER_SAMPLE_START_AT": {
+              "Ref": "SampleStartAt"
+            },
+            "BETER_SAMPLE_DURATION_SECONDS": {
+              "Ref": "SampleDurationSeconds"
             }
           }
         },
@@ -1622,6 +1641,12 @@
             },
             "BETER_FUNDING_CUTOFF_AT": {
               "Ref": "CreditCutoffAt"
+            },
+            "BETER_SAMPLE_START_AT": {
+              "Ref": "SampleStartAt"
+            },
+            "BETER_SAMPLE_DURATION_SECONDS": {
+              "Ref": "SampleDurationSeconds"
             }
           }
         },
@@ -1759,6 +1784,12 @@
             },
             "BETER_FUNDING_CUTOFF_AT": {
               "Ref": "CreditCutoffAt"
+            },
+            "BETER_SAMPLE_START_AT": {
+              "Ref": "SampleStartAt"
+            },
+            "BETER_SAMPLE_DURATION_SECONDS": {
+              "Ref": "SampleDurationSeconds"
             }
           }
         },
