@@ -65,6 +65,7 @@ begin
     coalesce(p_session->>'sealedTokens','')='' or char_length(p_session->>'sealedTokens')>65536 or
     (p_session->>'accessExpiresAt')::bigint<=floor(extract(epoch from clock_timestamp())*1000)::bigint or
     (p_session->>'refreshExpiresAt')::bigint<(p_session->>'accessExpiresAt')::bigint then raise exception 'invalid private session'; end if;
+  perform pg_advisory_xact_lock(hashtextextended('aws-auth:'||(p_session->>'userId'),0));
   insert into auth.aws_sessions(access_hash,refresh_hash,family_hash,user_id,sealed_tokens,access_expires_at,refresh_expires_at,previous_access_hash,previous_refresh_hash)
     values(v_access,v_refresh,v_family,(p_session->>'userId')::uuid,p_session->>'sealedTokens',(p_session->>'accessExpiresAt')::bigint,(p_session->>'refreshExpiresAt')::bigint,p_session->>'previousAccessHash',p_session->>'previousRefreshHash');
   insert into auth.aws_session_handles(access_hash,family_hash,expires_at) values(v_access,v_family,(p_session->>'refreshExpiresAt')::bigint);
@@ -85,6 +86,9 @@ create function auth.beter_session_rotate(p_old_refresh text,p_session jsonb) re
 language plpgsql security definer set search_path=auth,public,pg_temp as $$
 declare v_old auth.aws_sessions;
 begin
+  select * into v_old from auth.aws_sessions where refresh_hash=p_old_refresh;
+  if not found then return false; end if;
+  perform pg_advisory_xact_lock(hashtextextended('aws-auth:'||v_old.user_id::text,0));
   select * into v_old from auth.aws_sessions where refresh_hash=p_old_refresh for update;
   if not found or v_old.refresh_expires_at<=floor(extract(epoch from clock_timestamp())*1000)::bigint then return false; end if;
   if p_session->>'userId'<>v_old.user_id::text then raise exception 'session identity cannot change during refresh'; end if;
@@ -95,10 +99,13 @@ begin
 end $$;
 create function auth.beter_session_revoke(p_access text) returns jsonb
 language plpgsql security definer set search_path=auth,public,pg_temp as $$
-declare v_family text; v_access text; v_session jsonb;
+declare v_family text; v_access text; v_user uuid; v_session jsonb;
 begin
   select family_hash into v_family from auth.aws_session_handles where access_hash=p_access and expires_at>floor(extract(epoch from clock_timestamp())*1000)::bigint;
   if not found then return null; end if;
+  select user_id into v_user from auth.aws_sessions where family_hash=v_family;
+  if not found then return null; end if;
+  perform pg_advisory_xact_lock(hashtextextended('aws-auth:'||v_user::text,0));
   select access_hash into v_access from auth.aws_sessions where family_hash=v_family for update;
   v_session:=auth.beter_session_json(v_access);
   delete from auth.aws_sessions where family_hash=v_family;
@@ -109,6 +116,7 @@ create function auth.beter_sessions_revoke_user(p_id uuid) returns integer
 language plpgsql security definer set search_path=auth,public,pg_temp as $$
 declare v_count integer;
 begin
+  perform pg_advisory_xact_lock(hashtextextended('aws-auth:'||p_id::text,0));
   delete from auth.aws_session_handles where family_hash in(select family_hash from auth.aws_sessions where user_id=p_id);
   delete from auth.aws_sessions where user_id=p_id;get diagnostics v_count=row_count;return v_count;
 end $$;
