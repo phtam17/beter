@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,stat,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,stat,rm,symlink} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -37,4 +37,17 @@ test('publishing refuses incomplete state, an open stack, pending updates, and e
 });
 test('a resumed publisher preserves the private state and avoids a redundant origin update',async t=>{
  assert.equal(typeof publishDeployment,'function');const f=await fixture(t);f.state.parameters.SiteOrigin='https://'+f.outputs.CloudFrontDomain;f.stack.Parameters.find(p=>p.ParameterKey==='SiteOrigin').ParameterValue=f.state.parameters.SiteOrigin;f.stack.StackStatus='UPDATE_COMPLETE';await f.save();const result=await publishDeployment(f.options());assert.equal(result.updateStarted,false);assert.equal(f.calls.some(c=>c.operation==='update-stack'),false);assert.equal(f.calls.filter(c=>c.operation==='create-invalidation').length,1);assert.equal(JSON.parse(await readFile(join(f.privateDir,'state.json'),'utf8')).stagingAccess,'Basic PRIVATE_STAGING_VALUE');
+});
+
+test('malformed private JSON and unreviewed manifests fail without exposing recovery secrets',async t=>{
+ const f=await fixture(t);await writeFile(join(f.privateDir,'state.json'),'PRIVATE_SESSION_SECRET malformed JSON');await assert.rejects(()=>publishDeployment(f.options()),error=>/complete reviewed/.test(error.message)&&!error.message.includes('PRIVATE_SESSION_SECRET'));assert.equal(f.calls.length,0);
+ await f.save();for(const assets of [undefined,[],[{...f.manifest.assets[0],key:'assets/app.js'}]]){await writeFile(f.manifestPath,JSON.stringify({schemaVersion:1,assets}));await assert.rejects(()=>publishDeployment(f.options()),/complete reviewed public asset manifest/);}assert.equal(f.calls.length,0);
+});
+test('publisher rejects source symlinks and invalid public metadata before AWS calls',async t=>{
+ const f=await fixture(t);const asset=f.manifest.assets[0];for(const override of [{key:'.private/index.html'},{sourcePath:join(f.root,'private.html')},{contentType:'text/html\r\nInjected: value'},{cacheControl:'public'},{sha256:'not-a-hash'}]){f.manifest.assets=[{...asset,...override}];await f.save();await assert.rejects(()=>publishDeployment(f.options()),/unreviewed|complete reviewed/);}assert.equal(f.calls.length,0);
+ f.manifest.assets=[asset];await writeFile(join(f.root,'private.html'),'<html>secret</html>');await rm(asset.sourcePath);await symlink(join(f.root,'private.html'),asset.sourcePath);await f.save();await assert.rejects(()=>publishDeployment(f.options()),/symbolic/);assert.equal(f.calls.length,0);
+});
+test('account changes and incomplete remote outputs cannot publish public bytes',async t=>{
+ const f=await fixture(t);await assert.rejects(()=>publishDeployment({...f.options(),control:{call:async()=>({Account:'999999999999'})}}),/account changed/);assert.equal(f.calls.length,0);
+ f.stack.Outputs=f.stack.Outputs.filter(output=>output.OutputKey!=='DistributionId');await assert.rejects(()=>publishDeployment(f.options()),/incomplete public publishing outputs/);assert.equal(f.calls.some(call=>call.operation==='put-object'),false);
 });
