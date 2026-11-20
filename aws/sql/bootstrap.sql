@@ -131,11 +131,11 @@ begin
   delete from auth.aws_session_handles where access_hash in(select access_hash from auth.aws_session_handles where expires_at<=floor(extract(epoch from clock_timestamp())*1000)::bigint order by expires_at limit p_limit for update skip locked);get diagnostics v_handles=row_count;
   return jsonb_build_object('authSessionsDeleted',v_sessions,'authHandlesDeleted',v_handles);
 end $$;
-create function auth.beter_runtime_configure(p_password text) returns boolean
+create function auth.beter_runtime_configure(p_verifier text) returns boolean
 language plpgsql security definer set search_path=auth,public,pg_temp as $$
 begin
-  if p_password is null or p_password !~ '^[A-Za-z0-9_-]{32,128}$' then raise exception 'invalid runtime database credential'; end if;
-  execute format('alter role beter_runtime login password %L',p_password);return true;
+  if p_verifier is null or p_verifier !~ '^SCRAM-SHA-256\$4096:[A-Za-z0-9+/]{22}==\$[A-Za-z0-9+/]{43}=:[A-Za-z0-9+/]{43}=$' then raise exception 'invalid runtime database credential'; end if;
+  execute format('alter role beter_runtime login password %L',p_verifier);return true;
 end $$;
 revoke all on function auth.beter_user_upsert(uuid,text),auth.beter_session_json(text),auth.beter_session_put(jsonb,text),auth.beter_session_get(text,text),auth.beter_session_rotate(text,jsonb),auth.beter_session_revoke(text),auth.beter_sessions_revoke_user(uuid),auth.beter_sessions_revoke_email(text),auth.beter_session_prune(integer),auth.beter_runtime_configure(text) from public,anon,authenticated,service_role,beter_runtime;
 grant execute on function auth.beter_user_upsert(uuid,text),auth.beter_session_put(jsonb,text),auth.beter_session_get(text,text),auth.beter_session_rotate(text,jsonb),auth.beter_session_revoke(text),auth.beter_sessions_revoke_user(uuid),auth.beter_sessions_revoke_email(text),auth.beter_session_prune(integer) to service_role;

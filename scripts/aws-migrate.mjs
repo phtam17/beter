@@ -1,4 +1,4 @@
-import {createHash} from 'node:crypto';
+import {createHash,createHmac,pbkdf2Sync,randomBytes} from 'node:crypto';
 import {readFile,readdir} from 'node:fs/promises';
 import {resolve,basename} from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -6,6 +6,19 @@ import {splitSql} from '../server/sql.ts';
 import {createDataApiDatabase,createPostgresDatabase} from '../server/aws-database.ts';
 import {SecretsManagerClient,GetSecretValueCommand} from '@aws-sdk/client-secrets-manager';
 export {splitSql};
+
+// Generated runtime passwords are ASCII, so SASLprep leaves them unchanged.
+// PostgreSQL catalog-pg-authid format; RFC5802 keys with RFC7677 SHA-256.
+export function createScramVerifier(password){
+  if(typeof password!=='string'||!/^[A-Za-z0-9_-]{32,128}$/.test(password))throw new TypeError('Invalid generated runtime credential.');
+  const salt=randomBytes(16),salted=pbkdf2Sync(password,salt,4096,32,'sha256');
+  try{
+    const clientKey=createHmac('sha256',salted).update('Client Key').digest();
+    const storedKey=createHash('sha256').update(clientKey).digest('base64');clientKey.fill(0);
+    const serverKey=createHmac('sha256',salted).update('Server Key').digest('base64');
+    return`SCRAM-SHA-256$4096:${salt.toString('base64')}$${storedKey}:${serverKey}`;
+  }finally{salted.fill(0);}
+}
 
 function migrationError(code,id){const error=new Error(code==='MIGRATION_DRIFT'?'Applied migration checksum differs from the reviewed source.':'Database migration failed; inspect the private deployment record.');error.code=code;if(id)error.migrationId=id;return error;}
 export async function loadAwsMigrations({root=resolve(import.meta.dirname,'..')}={}){
@@ -44,7 +57,7 @@ export async function applyAwsMigrations({database,migrations,dryRun=false,runti
         (changed?report.applied:report.alreadyApplied).push(file.id);
       }catch(error){if(error.code==='MIGRATION_DRIFT')throw error;throw migrationError('MIGRATION_FAILED',file.id);}
     }
-    if(runtimePassword!==undefined){await database.transaction(query=>query.query('select auth.beter_runtime_configure(:password) as configured',{password:runtimePassword}));report.runtimeConfigured=true;}
+    if(runtimePassword!==undefined){const verifier=createScramVerifier(runtimePassword);await database.transaction(query=>query.query('select auth.beter_runtime_configure(:verifier) as configured',{verifier}));report.runtimeConfigured=true;}
     return report;
   }catch(error){if(['MIGRATION_DRIFT','MIGRATION_FAILED'].includes(error.code))throw error;throw migrationError('MIGRATION_FAILED');}
 }
