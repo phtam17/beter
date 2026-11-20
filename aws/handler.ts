@@ -30,7 +30,7 @@ export function createAwsHandler({getRuntime,workerTask,onMetric,env=process.env
   };
   const metric=onMetric||((item:Metric)=>{
     const Environment=env.BETER_ENVIRONMENT==='production'?'production':'staging';
-    console.log(JSON.stringify({_aws:{Timestamp:Date.now(),CloudWatchMetrics:[{Namespace:'Beter',Dimensions:[['Environment']],Metrics:[{Name:item.name,Unit:'Count'}]}]},Environment,[item.name]:item.value}));
+    process.stdout.write(JSON.stringify({_aws:{Timestamp:Date.now(),CloudWatchMetrics:[{Namespace:'Beter',Dimensions:[['Environment']],Metrics:[{Name:item.name,Unit:'Count'}]}]},Environment,[item.name]:item.value})+'\n');
   });
   return async(event:HttpEvent)=>{
     const http=event?.version==='2.0'&&typeof event.requestContext?.http?.method==='string';
