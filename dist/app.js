@@ -805,7 +805,7 @@ function readRecoveryLink() {
   else if(token){authMode='signin';authMessage='Your email link was opened. Sign in to continue.';renderAuth();authDialog.showModal();}
 }
 document.querySelector('#account-button').addEventListener('click',openAccount);
-authDialog.addEventListener('close',()=>{authAttempt++;api.cancelAuthentication?.();authBusy=false;authDialog.querySelectorAll('input[type="password"],#auth-code').forEach(input=>{input.value='';});});
+authDialog.addEventListener('close',()=>{authAttempt++;api.cancelAuthentication?.();authBusy=false;authDialog.querySelectorAll('input[type="password"],#auth-code').forEach(input=>{input.value='';});focusElement(document.querySelector('#account-button'));});
 authDialog.addEventListener('click',event=>{if(event.target===authDialog){const rect=authDialog.getBoundingClientRect();if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom)authDialog.close();}});
 function editingForm(){return Boolean(document.activeElement?.matches('input,textarea,select,[contenteditable="true"]'));}
 window.addEventListener('focus',()=>{if(accountMode&&!accountLoading&&!selections.length&&!authDialog.open&&!dialog.open&&!editingForm())void loadAccount({quiet:true});});
