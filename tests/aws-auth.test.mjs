@@ -124,3 +124,9 @@ test('invalid configuration and database faults fail without credential disclosu
   const f=fixture();for(const options of [{secret:'short'},{clientId:''},{region:''},{timeoutMs:0}])assert.throws(()=>f.adapter(options),/configur|secret|timeout|client|region/i);
   f.store.createSession=async()=>{throw new Error('database-password=private');};await assert.rejects(()=>signin(f),error=>error.status===503&&!/database-password|private/.test(error.message));
 });
+test('a short configured refresh lifetime also bounds the initial access lifetime',async()=>{
+  const f=fixture({send:async(command,next)=>{const result=await next(command);if(result.AuthenticationResult)result.AuthenticationResult.ExpiresIn=86400;return result;}});
+  const auth=f.adapter({refreshTtlMs:3600000}),result=await auth.auth('signin',{email,password:'a-long-private-password'});
+  assert.ok(result.session.expires_at*1000<=[...f.sessions.values()][0].refreshExpiresAt);
+  assert.equal((await auth.authenticate(result.session.access_token)).id,id);
+});
