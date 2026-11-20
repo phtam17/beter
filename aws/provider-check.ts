@@ -59,7 +59,8 @@ export function createProviderProbe({env,secretClient,fetchImpl=fetch,now=()=>ne
         if(stage==='secret')return fail('SECRET_UNAVAILABLE');
         const code=(error as {code?:unknown})?.code;
         const status=captured.status;
-        return fail(code==='provider_timeout'?'PROBE_TIMEOUT':status===401?'PROVIDER_KEY_INVALID':status===402?'PROVIDER_QUOTA_EXHAUSTED':status===403?'PROVIDER_ACCESS_DENIED':status===429||code==='provider_rate_limited'?'PROVIDER_RATE_LIMITED':status===200||code==='provider_invalid_data'?'PROVIDER_INVALID_DATA':'PROVIDER_UNAVAILABLE',captured.quota);
+        const exhausted=(status===401||status===403)&&captured.quota?.remaining===0&&(captured.quota.used??0)>0;
+        return fail(code==='provider_timeout'?'PROBE_TIMEOUT':exhausted?'PROVIDER_QUOTA_EXHAUSTED':status===401?'PROVIDER_KEY_INVALID':status===402?'PROVIDER_QUOTA_EXHAUSTED':status===403?'PROVIDER_ACCESS_DENIED':status===429||code==='provider_rate_limited'?'PROVIDER_RATE_LIMITED':status===200||code==='provider_invalid_data'?'PROVIDER_INVALID_DATA':'PROVIDER_UNAVAILABLE',captured.quota);
       }
     })();
     try{return await Promise.race([run,deadline]);}
