@@ -1,5 +1,5 @@
 export function readSettings(env:Record<string,string|undefined>={}) {
-  const production=env.NODE_ENV==='production'||env.VERCEL==='1';
+  const production=env.NODE_ENV==='production'||env.VERCEL==='1'||env.BETER_BACKEND==='aws';
   const environment=env.BETER_ENVIRONMENT||(env.VERCEL_ENV==='preview'?'staging':production?'production':'development');
   if(!['development','staging','production'].includes(environment))throw new Error('Choose a valid BETER_ENVIRONMENT.');
   const hasAnySupabase=Boolean(env.SUPABASE_URL||env.SUPABASE_ANON_KEY||env.SUPABASE_SERVICE_ROLE_KEY);
