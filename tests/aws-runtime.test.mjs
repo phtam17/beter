@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
+import {SecretsManagerClient} from '@aws-sdk/client-secrets-manager';
 const implementation=await import('../server/aws-runtime.ts').catch(error=>{if(error.code==='ERR_MODULE_NOT_FOUND')return{};throw error;});
 const env={NODE_ENV:'production',BETER_BACKEND:'aws',BETER_ENVIRONMENT:'staging',BETER_DATA_MODE:'sample',AWS_REGION:'us-west-2',SITE_URL:'https://staging.example.com',BETER_DATABASE_RESOURCE_ARN:'arn:aws:rds:us-west-2:123456789012:cluster:beter-staging',BETER_DATABASE_SECRET_ARN:'arn:aws:secretsmanager:us-west-2:123456789012:secret:beter-db-abcdef',BETER_DATABASE_NAME:'beter',BETER_COGNITO_CLIENT_ID:'client123',BETER_COGNITO_USER_POOL_ID:'us-west-2_Pool123',BETER_RUNTIME_SECRET_ARN:'arn:aws:secretsmanager:us-west-2:123456789012:secret:beter-runtime-abcdef'};
 const privateValues={sessionSecret:'s'.repeat(48),jobSecret:'j'.repeat(48),originSecret:'o'.repeat(48),oddsApiKey:''};
@@ -38,4 +39,21 @@ test('AWS runtime uses the SDK-shaped Data API transport when no database is inj
 });
 test('AWS entry stays independent from local database code and TypeScript includes deployment entrypoints',async()=>{
   assert.equal(typeof implementation.createAwsRuntime,'function');const source=await readFile(new URL('../server/aws-runtime.ts',import.meta.url),'utf8');assert.doesNotMatch(source,/['"]\.\/runtime\.ts|pglite|['"]\.\/local\.ts/i);const config=JSON.parse(await readFile(new URL('../tsconfig.json',import.meta.url),'utf8'));assert.ok(config.include.includes('aws/**/*.ts'));
+});
+test('private settings retrieval has a bounded deadline and aborts stalled AWS calls',async()=>{
+  const f=fixture();let signal;const secretsClient={send(_command,options){signal=options.abortSignal;return new Promise(()=>{});}};
+  await assert.rejects(()=>runtime({...f,secretsClient,secretTimeoutMs:5}),error=>error.code==='AWS_RUNTIME_UNAVAILABLE');assert.equal(signal.aborted,true);assert.equal(f.calls.length,0);
+  for(const secretTimeoutMs of [0,NaN,-1]){const f=fixture();await assert.rejects(()=>runtime({...f,secretTimeoutMs}));assert.equal(f.secretsCalls.length,0);}
+});
+test('AWS runtime rejects binary-only private settings and incomplete service configuration safely',async()=>{
+  const f=fixture();await assert.rejects(()=>runtime({...f,secretsClient:{send:async()=>({SecretBinary:new Uint8Array([1,2])})}}),error=>error.code==='AWS_RUNTIME_UNAVAILABLE');
+  await assert.rejects(()=>runtime({...f,env:{...env,BETER_DATABASE_SECRET_ARN:'private invalid secret'}}),error=>error.code==='AWS_RUNTIME_UNAVAILABLE'&&!error.message.includes('private invalid secret'));assert.equal(f.calls.length,0);
+});
+test('AWS runtime defaults to process settings and owned SDK clients without loading local storage',async t=>{
+  const f=fixture({secret:JSON.stringify({...privateValues,oddsApiKey:'live-private-provider-key'})});const previous={};
+  const values={...env,BETER_ENVIRONMENT:'production',BETER_DATA_MODE:'live'};
+  for(const [key,value]of Object.entries(values)){previous[key]=process.env[key];process.env[key]=value;}
+  t.after(()=>{for(const [key,value]of Object.entries(previous)){if(value===undefined)delete process.env[key];else process.env[key]=value;}});
+  t.mock.method(SecretsManagerClient.prototype,'send',f.secretsClient.send);
+  assert.equal(typeof implementation.createAwsRuntime,'function');const app=await implementation.createAwsRuntime({database:f.database});assert.equal(app.settings.dataMode,'live');assert.equal(app.settings.oddsApiKey,'live-private-provider-key');assert.equal((await app.handle(new Request('https://staging.example.com/api/health'))).status,200);await app.close();assert.equal(f.closed(),1);
 });

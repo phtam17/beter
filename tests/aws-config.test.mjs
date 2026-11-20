@@ -20,3 +20,6 @@ test('AWS sample deployment requires staging explicitly and live deployment requ
   assert.throws(()=>readSettings({...awsEnvironment,BETER_DATA_MODE:'live'}),/provider key/i);
   assert.equal(readSettings({...awsEnvironment,BETER_ENVIRONMENT:'production',BETER_DATA_MODE:'live',ODDS_API_KEY:'private-provider-key'}).dataMode,'live');
 });
+test('AWS always applies hosted production guards when NODE_ENV is absent or development',()=>{
+  for(const NODE_ENV of [undefined,'development']){const settings=readSettings({...awsEnvironment,NODE_ENV,BETER_ENVIRONMENT:undefined,BETER_DATA_MODE:'live',ODDS_API_KEY:'live-private-provider-key'});assert.equal(settings.production,true);assert.equal(settings.environment,'production');}
+});
