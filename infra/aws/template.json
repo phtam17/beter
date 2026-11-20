@@ -1,0 +1,2522 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Beter managed AWS deployment. Closed staging and disabled jobs by default; reviewed credits are required. Budget alerts are not a hard spend cap.",
+  "Parameters": {
+    "AppName": {
+      "Type": "String",
+      "Default": "beter",
+      "AllowedPattern": "[a-z][a-z0-9-]{1,15}"
+    },
+    "Environment": {
+      "Type": "String",
+      "Default": "staging",
+      "AllowedValues": [
+        "staging",
+        "production"
+      ]
+    },
+    "LaunchOpen": {
+      "Type": "String",
+      "Default": "false",
+      "AllowedValues": [
+        "false",
+        "true"
+      ]
+    },
+    "HostedChecksApproved": {
+      "Type": "String",
+      "Default": "false",
+      "AllowedValues": [
+        "false",
+        "true"
+      ]
+    },
+    "ScheduleState": {
+      "Type": "String",
+      "Default": "DISABLED",
+      "AllowedValues": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "CreditsVerified": {
+      "Type": "String",
+      "Default": "false",
+      "AllowedValues": [
+        "false",
+        "true"
+      ],
+      "Description": "Operator attestation after checking current eligible credit balance and expiry. Never assume credits from a prior account."
+    },
+    "CreditCutoffAt": {
+      "Type": "String",
+      "Default": "",
+      "AllowedPattern": "^$|^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$",
+      "Description": "UTC shutdown/review cutoff before verified credits expire, without trailing Z."
+    },
+    "MonthlyCashCeilingUsd": {
+      "Type": "Number",
+      "Default": 10,
+      "MinValue": 1,
+      "MaxValue": 10,
+      "Description": "Net account cost alert threshold after credits; AWS Budgets does not enforce a hard spending cap."
+    },
+    "StagingAuthorizationHash": {
+      "Type": "String",
+      "NoEcho": true,
+      "Default": "0000000000000000000000000000000000000000000000000000000000000000",
+      "MinLength": 64,
+      "MaxLength": 64,
+      "AllowedPattern": "[a-f0-9]{64}",
+      "Description": "SHA256 of the full expected Basic Authorization value, never the raw staging password."
+    },
+    "TestEmailAllowlist": {
+      "Type": "String",
+      "Default": "",
+      "NoEcho": true,
+      "Description": "Comma-separated staging test email addresses. Empty denies every signup while launch is closed."
+    },
+    "SiteOrigin": {
+      "Type": "String",
+      "Default": "https://pending.invalid",
+      "AllowedPattern": "https://[A-Za-z0-9.-]+(?::[0-9]+)?",
+      "Description": "Update to the CloudFront HTTPS origin after first closed-stack creation, or supply the custom HTTPS origin."
+    },
+    "RuntimeSecretArn": {
+      "Type": "String",
+      "AllowedPattern": "arn:[a-z-]+:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+",
+      "Description": "Pre-created private JSON secret with sessionSecret,jobSecret,originSecret,oddsApiKey."
+    },
+    "CodeS3Bucket": {
+      "Type": "String",
+      "MinLength": 3
+    },
+    "CodeS3Key": {
+      "Type": "String",
+      "MinLength": 1
+    },
+    "CodeS3ObjectVersion": {
+      "Type": "String",
+      "Default": ""
+    },
+    "DatabaseEngineVersion": {
+      "Type": "String",
+      "Default": "17.11",
+      "AllowedPattern": "[0-9]+\\.[0-9]+(?:\\.[0-9]+)?",
+      "Description": "Preflight must verify regional Data API, Serverlessv2 and scale-to-zero support for this exact version."
+    },
+    "MaxDatabaseAcu": {
+      "Type": "Number",
+      "Default": 1,
+      "AllowedValues": [
+        1,
+        2
+      ]
+    },
+    "AlertEmail": {
+      "Type": "String",
+      "Default": "",
+      "Description": "Operator email for SNS confirmation and net-cash budget alerts."
+    },
+    "SesSourceArn": {
+      "Type": "String",
+      "Default": ""
+    },
+    "EmailFrom": {
+      "Type": "String",
+      "Default": ""
+    },
+    "SupportUrl": {
+      "Type": "String",
+      "Default": ""
+    },
+    "PrivacyUrl": {
+      "Type": "String",
+      "Default": ""
+    },
+    "AccountDeletionUrl": {
+      "Type": "String",
+      "Default": ""
+    },
+    "CustomDomainName": {
+      "Type": "String",
+      "Default": ""
+    },
+    "AcmCertificateArn": {
+      "Type": "String",
+      "Default": "",
+      "Description": "ACM certificate in us-east-1 for the custom CloudFront domain."
+    },
+    "DataMode": {
+      "Type": "String",
+      "Default": "sample",
+      "AllowedValues": [
+        "sample",
+        "live"
+      ]
+    }
+  },
+  "Rules": {
+    "VerifiedFunding": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Equals": [
+              {
+                "Ref": "CreditsVerified"
+              },
+              "true"
+            ]
+          },
+          "AssertDescription": "Verify current eligible AWS credits before creating this managed stack; it costs more than $10/month without credits."
+        },
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Equals": [
+                  {
+                    "Ref": "CreditCutoffAt"
+                  },
+                  ""
+                ]
+              }
+            ]
+          },
+          "AssertDescription": "Provide a reviewed UTC credit cutoff date before credit expiry."
+        }
+      ]
+    },
+    "PublicLaunchChecks": {
+      "RuleCondition": {
+        "Fn::Equals": [
+          {
+            "Ref": "LaunchOpen"
+          },
+          "true"
+        ]
+      },
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Equals": [
+              {
+                "Ref": "HostedChecksApproved"
+              },
+              "true"
+            ]
+          },
+          "AssertDescription": "Retain completed hosted launch checks before opening access."
+        },
+        {
+          "Assert": {
+            "Fn::Equals": [
+              {
+                "Ref": "Environment"
+              },
+              "production"
+            ]
+          },
+          "AssertDescription": "Staging cannot be opened as public production."
+        },
+        {
+          "Assert": {
+            "Fn::Equals": [
+              {
+                "Ref": "DataMode"
+              },
+              "live"
+            ]
+          },
+          "AssertDescription": "Public production requires the live provider."
+        },
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Equals": [
+                  {
+                    "Ref": "AlertEmail"
+                  },
+                  ""
+                ]
+              }
+            ]
+          },
+          "AssertDescription": "Public release requires AlertEmail."
+        },
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Equals": [
+                  {
+                    "Ref": "SesSourceArn"
+                  },
+                  ""
+                ]
+              }
+            ]
+          },
+          "AssertDescription": "Public release requires SesSourceArn."
+        },
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Equals": [
+                  {
+                    "Ref": "EmailFrom"
+                  },
+                  ""
+                ]
+              }
+            ]
+          },
+          "AssertDescription": "Public release requires EmailFrom."
+        },
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Equals": [
+                  {
+                    "Ref": "SupportUrl"
+                  },
+                  ""
+                ]
+              }
+            ]
+          },
+          "AssertDescription": "Public release requires SupportUrl."
+        },
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Equals": [
+                  {
+                    "Ref": "PrivacyUrl"
+                  },
+                  ""
+                ]
+              }
+            ]
+          },
+          "AssertDescription": "Public release requires PrivacyUrl."
+        },
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Equals": [
+                  {
+                    "Ref": "AccountDeletionUrl"
+                  },
+                  ""
+                ]
+              }
+            ]
+          },
+          "AssertDescription": "Public release requires AccountDeletionUrl."
+        },
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Equals": [
+                  {
+                    "Ref": "CustomDomainName"
+                  },
+                  ""
+                ]
+              }
+            ]
+          },
+          "AssertDescription": "Public release requires CustomDomainName."
+        },
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Equals": [
+                  {
+                    "Ref": "AcmCertificateArn"
+                  },
+                  ""
+                ]
+              }
+            ]
+          },
+          "AssertDescription": "Public release requires AcmCertificateArn."
+        }
+      ]
+    }
+  },
+  "Conditions": {
+    "IsProduction": {
+      "Fn::Equals": [
+        {
+          "Ref": "Environment"
+        },
+        "production"
+      ]
+    },
+    "IsPublic": {
+      "Fn::Equals": [
+        {
+          "Ref": "LaunchOpen"
+        },
+        "true"
+      ]
+    },
+    "HasAlertEmail": {
+      "Fn::Not": [
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "AlertEmail"
+            },
+            ""
+          ]
+        }
+      ]
+    },
+    "HasSes": {
+      "Fn::Not": [
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "SesSourceArn"
+            },
+            ""
+          ]
+        }
+      ]
+    },
+    "HasDomain": {
+      "Fn::Not": [
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "CustomDomainName"
+            },
+            ""
+          ]
+        }
+      ]
+    },
+    "HasCodeVersion": {
+      "Fn::Not": [
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "CodeS3ObjectVersion"
+            },
+            ""
+          ]
+        }
+      ]
+    }
+  },
+  "Resources": {
+    "Vpc": {
+      "Type": "AWS::EC2::VPC",
+      "Properties": {
+        "CidrBlock": "10.42.0.0/24",
+        "EnableDnsSupport": true,
+        "EnableDnsHostnames": true,
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      }
+    },
+    "PrivateSubnet0": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "CidrBlock": "10.42.0.0/25",
+        "AvailabilityZone": {
+          "Fn::Select": [
+            0,
+            {
+              "Fn::GetAZs": ""
+            }
+          ]
+        },
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      }
+    },
+    "PrivateSubnet1": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "CidrBlock": "10.42.0.128/25",
+        "AvailabilityZone": {
+          "Fn::Select": [
+            1,
+            {
+              "Fn::GetAZs": ""
+            }
+          ]
+        },
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      }
+    },
+    "DatabaseSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "No inbound database network access; applications use the IAM-authorized Data API.",
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "SecurityGroupIngress": [],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      }
+    },
+    "DatabaseSubnetGroup": {
+      "Type": "AWS::RDS::DBSubnetGroup",
+      "Properties": {
+        "DBSubnetGroupDescription": "Private database subnets without NAT or public routes.",
+        "SubnetIds": [
+          {
+            "Ref": "PrivateSubnet0"
+          },
+          {
+            "Ref": "PrivateSubnet1"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      }
+    },
+    "DatabaseCluster": {
+      "Type": "AWS::RDS::DBCluster",
+      "Properties": {
+        "Engine": "aurora-postgresql",
+        "EngineVersion": {
+          "Ref": "DatabaseEngineVersion"
+        },
+        "DatabaseName": "beter",
+        "MasterUsername": "beter_admin",
+        "ManageMasterUserPassword": true,
+        "EnableHttpEndpoint": true,
+        "StorageEncrypted": true,
+        "BackupRetentionPeriod": {
+          "Fn::If": [
+            "IsProduction",
+            7,
+            3
+          ]
+        },
+        "DeletionProtection": {
+          "Fn::If": [
+            "IsProduction",
+            true,
+            false
+          ]
+        },
+        "CopyTagsToSnapshot": true,
+        "DBSubnetGroupName": {
+          "Ref": "DatabaseSubnetGroup"
+        },
+        "VpcSecurityGroupIds": [
+          {
+            "Ref": "DatabaseSecurityGroup"
+          }
+        ],
+        "ServerlessV2ScalingConfiguration": {
+          "MinCapacity": {
+            "Fn::If": [
+              "IsProduction",
+              0.5,
+              0
+            ]
+          },
+          "MaxCapacity": {
+            "Ref": "MaxDatabaseAcu"
+          },
+          "SecondsUntilAutoPause": {
+            "Fn::If": [
+              "IsProduction",
+              {
+                "Ref": "AWS::NoValue"
+              },
+              600
+            ]
+          }
+        },
+        "EnableCloudwatchLogsExports": [
+          "postgresql"
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      },
+      "DeletionPolicy": "Snapshot",
+      "UpdateReplacePolicy": "Snapshot"
+    },
+    "DatabaseWriter": {
+      "Type": "AWS::RDS::DBInstance",
+      "Properties": {
+        "DBClusterIdentifier": {
+          "Ref": "DatabaseCluster"
+        },
+        "Engine": "aurora-postgresql",
+        "DBInstanceClass": "db.serverless",
+        "PubliclyAccessible": false,
+        "AutoMinorVersionUpgrade": true,
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      }
+    },
+    "AppDatabaseSecret": {
+      "Type": "AWS::SecretsManager::Secret",
+      "Properties": {
+        "Description": "Least-privilege Beter runtime DB login, initialized by the reviewed migration runner.",
+        "GenerateSecretString": {
+          "SecretStringTemplate": "{\"username\":\"beter_runtime\"}",
+          "GenerateStringKey": "password",
+          "PasswordLength": 40,
+          "ExcludePunctuation": true
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      }
+    },
+    "AppSecretAttachment": {
+      "Type": "AWS::SecretsManager::SecretTargetAttachment",
+      "Properties": {
+        "SecretId": {
+          "Ref": "AppDatabaseSecret"
+        },
+        "TargetId": {
+          "Ref": "DatabaseCluster"
+        },
+        "TargetType": "AWS::RDS::DBCluster"
+      }
+    },
+    "NotificationTopic": {
+      "Type": "AWS::SNS::Topic",
+      "Properties": {
+        "DisplayName": "Beter operational alerts",
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      }
+    },
+    "NotificationSubscription": {
+      "Type": "AWS::SNS::Subscription",
+      "Properties": {
+        "Protocol": "email",
+        "Endpoint": {
+          "Ref": "AlertEmail"
+        },
+        "TopicArn": {
+          "Ref": "NotificationTopic"
+        }
+      },
+      "Condition": "HasAlertEmail"
+    },
+    "NotificationPolicy": {
+      "Type": "AWS::SNS::TopicPolicy",
+      "Properties": {
+        "Topics": [
+          {
+            "Ref": "NotificationTopic"
+          }
+        ],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "cloudwatch.amazonaws.com"
+              },
+              "Action": "sns:Publish",
+              "Resource": {
+                "Ref": "NotificationTopic"
+              },
+              "Condition": {
+                "StringEquals": {
+                  "AWS:SourceAccount": {
+                    "Ref": "AWS::AccountId"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "CashBudget": {
+      "Type": "AWS::Budgets::Budget",
+      "Properties": {
+        "Budget": {
+          "BudgetName": {
+            "Fn::Sub": "${AWS::StackName}-net-cash"
+          },
+          "BudgetType": "COST",
+          "TimeUnit": "MONTHLY",
+          "BudgetLimit": {
+            "Amount": {
+              "Ref": "MonthlyCashCeilingUsd"
+            },
+            "Unit": "USD"
+          },
+          "CostTypes": {
+            "IncludeCredit": true,
+            "IncludeRefund": true,
+            "IncludeTax": true,
+            "IncludeSupport": true,
+            "IncludeSubscription": true,
+            "IncludeRecurring": true,
+            "IncludeUpfront": true,
+            "UseBlended": false
+          }
+        },
+        "NotificationsWithSubscribers": [
+          {
+            "Notification": {
+              "NotificationType": "ACTUAL",
+              "ComparisonOperator": "GREATER_THAN",
+              "Threshold": 50,
+              "ThresholdType": "PERCENTAGE"
+            },
+            "Subscribers": [
+              {
+                "SubscriptionType": "EMAIL",
+                "Address": {
+                  "Ref": "AlertEmail"
+                }
+              }
+            ]
+          },
+          {
+            "Notification": {
+              "NotificationType": "ACTUAL",
+              "ComparisonOperator": "GREATER_THAN",
+              "Threshold": 80,
+              "ThresholdType": "PERCENTAGE"
+            },
+            "Subscribers": [
+              {
+                "SubscriptionType": "EMAIL",
+                "Address": {
+                  "Ref": "AlertEmail"
+                }
+              }
+            ]
+          },
+          {
+            "Notification": {
+              "NotificationType": "ACTUAL",
+              "ComparisonOperator": "GREATER_THAN",
+              "Threshold": 100,
+              "ThresholdType": "PERCENTAGE"
+            },
+            "Subscribers": [
+              {
+                "SubscriptionType": "EMAIL",
+                "Address": {
+                  "Ref": "AlertEmail"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "Condition": "HasAlertEmail"
+    },
+    "ApiLogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": {
+          "Fn::Sub": "${AppName}-${Environment}-api"
+        },
+        "RetentionInDays": {
+          "Fn::If": [
+            "IsProduction",
+            30,
+            7
+          ]
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      }
+    },
+    "WorkerLogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": {
+          "Fn::Sub": "${AppName}-${Environment}-worker"
+        },
+        "RetentionInDays": {
+          "Fn::If": [
+            "IsProduction",
+            30,
+            7
+          ]
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      }
+    },
+    "MonitorLogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": {
+          "Fn::Sub": "${AppName}-${Environment}-monitor"
+        },
+        "RetentionInDays": {
+          "Fn::If": [
+            "IsProduction",
+            30,
+            7
+          ]
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      }
+    },
+    "SignupLogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": {
+          "Fn::Sub": "${AppName}-${Environment}-signup"
+        },
+        "RetentionInDays": {
+          "Fn::If": [
+            "IsProduction",
+            30,
+            7
+          ]
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      }
+    },
+    "RuntimeRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "BeterRuntime",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents"
+                  ],
+                  "Resource": [
+                    {
+                      "Fn::GetAtt": [
+                        "ApiLogGroup",
+                        "Arn"
+                      ]
+                    },
+                    {
+                      "Fn::GetAtt": [
+                        "WorkerLogGroup",
+                        "Arn"
+                      ]
+                    },
+                    {
+                      "Fn::GetAtt": [
+                        "MonitorLogGroup",
+                        "Arn"
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "secretsmanager:GetSecretValue"
+                  ],
+                  "Resource": [
+                    {
+                      "Ref": "RuntimeSecretArn"
+                    },
+                    {
+                      "Ref": "AppDatabaseSecret"
+                    }
+                  ]
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "rds-data:BeginTransaction",
+                    "rds-data:ExecuteStatement",
+                    "rds-data:CommitTransaction",
+                    "rds-data:RollbackTransaction"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "DatabaseCluster",
+                      "DBClusterArn"
+                    ]
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "sns:Publish",
+                  "Resource": {
+                    "Ref": "NotificationTopic"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      }
+    },
+    "SignupRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "SignupLogsOnly",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "SignupLogGroup",
+                      "Arn"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      }
+    },
+    "PreSignupFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": {
+          "Fn::Sub": "${AppName}-${Environment}-signup"
+        },
+        "Runtime": "nodejs24.x",
+        "Architectures": [
+          "arm64"
+        ],
+        "Handler": "index.preSignupHandler",
+        "Code": {
+          "S3Bucket": {
+            "Ref": "CodeS3Bucket"
+          },
+          "S3Key": {
+            "Ref": "CodeS3Key"
+          },
+          "S3ObjectVersion": {
+            "Fn::If": [
+              "HasCodeVersion",
+              {
+                "Ref": "CodeS3ObjectVersion"
+              },
+              {
+                "Ref": "AWS::NoValue"
+              }
+            ]
+          }
+        },
+        "Role": {
+          "Fn::GetAtt": [
+            "SignupRole",
+            "Arn"
+          ]
+        },
+        "Timeout": 5,
+        "MemorySize": 128,
+        "ReservedConcurrentExecutions": 1,
+        "Environment": {
+          "Variables": {
+            "BETER_LAUNCH_OPEN": {
+              "Ref": "LaunchOpen"
+            },
+            "BETER_TEST_EMAILS": {
+              "Ref": "TestEmailAllowlist"
+            },
+            "BETER_FUNDING_CUTOFF_AT": {
+              "Ref": "CreditCutoffAt"
+            }
+          }
+        },
+        "LoggingConfig": {
+          "LogFormat": "JSON",
+          "LogGroup": {
+            "Ref": "SignupLogGroup"
+          }
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      }
+    },
+    "UserPool": {
+      "Type": "AWS::Cognito::UserPool",
+      "Properties": {
+        "UserPoolName": {
+          "Fn::Sub": "${AppName}-${Environment}"
+        },
+        "UsernameAttributes": [
+          "email"
+        ],
+        "UsernameConfiguration": {
+          "CaseSensitive": false
+        },
+        "AutoVerifiedAttributes": [
+          "email"
+        ],
+        "Schema": [
+          {
+            "Name": "email",
+            "AttributeDataType": "String",
+            "Required": true,
+            "Mutable": false
+          }
+        ],
+        "Policies": {
+          "PasswordPolicy": {
+            "MinimumLength": 10,
+            "RequireUppercase": true,
+            "RequireLowercase": true,
+            "RequireNumbers": true,
+            "RequireSymbols": false,
+            "TemporaryPasswordValidityDays": 1
+          }
+        },
+        "AccountRecoverySetting": {
+          "RecoveryMechanisms": [
+            {
+              "Name": "verified_email",
+              "Priority": 1
+            }
+          ]
+        },
+        "EmailConfiguration": {
+          "Fn::If": [
+            "HasSes",
+            {
+              "EmailSendingAccount": "DEVELOPER",
+              "SourceArn": {
+                "Ref": "SesSourceArn"
+              },
+              "From": {
+                "Ref": "EmailFrom"
+              }
+            },
+            {
+              "EmailSendingAccount": "COGNITO_DEFAULT"
+            }
+          ]
+        },
+        "VerificationMessageTemplate": {
+          "DefaultEmailOption": "CONFIRM_WITH_LINK",
+          "EmailSubjectByLink": "Verify your Beter account",
+          "EmailMessageByLink": "Confirm your Beter account: {##Verify your email##}"
+        },
+        "LambdaConfig": {
+          "PreSignUp": {
+            "Fn::GetAtt": [
+              "PreSignupFunction",
+              "Arn"
+            ]
+          }
+        },
+        "DeletionProtection": {
+          "Fn::If": [
+            "IsProduction",
+            "ACTIVE",
+            "INACTIVE"
+          ]
+        },
+        "UserPoolTags": {
+          "Project": {
+            "Ref": "AppName"
+          },
+          "Environment": {
+            "Ref": "Environment"
+          }
+        }
+      }
+    },
+    "SignupInvokePermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Ref": "PreSignupFunction"
+        },
+        "Principal": "cognito-idp.amazonaws.com",
+        "SourceArn": {
+          "Fn::GetAtt": [
+            "UserPool",
+            "Arn"
+          ]
+        },
+        "SourceAccount": {
+          "Ref": "AWS::AccountId"
+        }
+      }
+    },
+    "UserPoolDomain": {
+      "Type": "AWS::Cognito::UserPoolDomain",
+      "Properties": {
+        "Domain": {
+          "Fn::Sub": "${AppName}-${Environment}-${AWS::AccountId}"
+        },
+        "UserPoolId": {
+          "Ref": "UserPool"
+        }
+      }
+    },
+    "UserPoolClient": {
+      "Type": "AWS::Cognito::UserPoolClient",
+      "Properties": {
+        "UserPoolId": {
+          "Ref": "UserPool"
+        },
+        "ClientName": {
+          "Fn::Sub": "${AppName}-${Environment}-server"
+        },
+        "GenerateSecret": false,
+        "ExplicitAuthFlows": [
+          "ALLOW_USER_PASSWORD_AUTH",
+          "ALLOW_REFRESH_TOKEN_AUTH"
+        ],
+        "PreventUserExistenceErrors": "ENABLED",
+        "EnableTokenRevocation": true,
+        "RefreshTokenValidity": 30,
+        "AccessTokenValidity": 15,
+        "IdTokenValidity": 15,
+        "TokenValidityUnits": {
+          "AccessToken": "minutes",
+          "IdToken": "minutes",
+          "RefreshToken": "days"
+        },
+        "RefreshTokenRotation": {
+          "Feature": "DISABLED"
+        },
+        "ReadAttributes": [
+          "email",
+          "email_verified"
+        ],
+        "WriteAttributes": [
+          "email"
+        ]
+      }
+    },
+    "ApiFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": {
+          "Fn::Sub": "${AppName}-${Environment}-api"
+        },
+        "Runtime": "nodejs24.x",
+        "Architectures": [
+          "arm64"
+        ],
+        "Handler": "index.handler",
+        "Code": {
+          "S3Bucket": {
+            "Ref": "CodeS3Bucket"
+          },
+          "S3Key": {
+            "Ref": "CodeS3Key"
+          },
+          "S3ObjectVersion": {
+            "Fn::If": [
+              "HasCodeVersion",
+              {
+                "Ref": "CodeS3ObjectVersion"
+              },
+              {
+                "Ref": "AWS::NoValue"
+              }
+            ]
+          }
+        },
+        "Role": {
+          "Fn::GetAtt": [
+            "RuntimeRole",
+            "Arn"
+          ]
+        },
+        "Timeout": 30,
+        "MemorySize": 512,
+        "ReservedConcurrentExecutions": 2,
+        "Environment": {
+          "Variables": {
+            "NODE_ENV": "production",
+            "BETER_BACKEND": "aws",
+            "BETER_ENVIRONMENT": {
+              "Ref": "Environment"
+            },
+            "BETER_DATA_MODE": {
+              "Ref": "DataMode"
+            },
+            "SITE_URL": {
+              "Ref": "SiteOrigin"
+            },
+            "ALLOWED_ORIGINS": {
+              "Ref": "SiteOrigin"
+            },
+            "AWS_DATABASE_NAME": "beter",
+            "AWS_DATABASE_RESOURCE_ARN": {
+              "Fn::GetAtt": [
+                "DatabaseCluster",
+                "DBClusterArn"
+              ]
+            },
+            "AWS_DATABASE_SECRET_ARN": {
+              "Ref": "AppDatabaseSecret"
+            },
+            "BETER_RUNTIME_SECRET_ARN": {
+              "Ref": "RuntimeSecretArn"
+            },
+            "AWS_COGNITO_USER_POOL_ID": {
+              "Ref": "UserPool"
+            },
+            "AWS_COGNITO_CLIENT_ID": {
+              "Ref": "UserPoolClient"
+            },
+            "BETER_SUPPORT_URL": {
+              "Ref": "SupportUrl"
+            },
+            "BETER_PRIVACY_URL": {
+              "Ref": "PrivacyUrl"
+            },
+            "BETER_ACCOUNT_DELETION_URL": {
+              "Ref": "AccountDeletionUrl"
+            }
+          }
+        },
+        "LoggingConfig": {
+          "LogFormat": "JSON",
+          "LogGroup": {
+            "Ref": "ApiLogGroup"
+          }
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      }
+    },
+    "WorkerFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": {
+          "Fn::Sub": "${AppName}-${Environment}-worker"
+        },
+        "Runtime": "nodejs24.x",
+        "Architectures": [
+          "arm64"
+        ],
+        "Handler": "index.handler",
+        "Code": {
+          "S3Bucket": {
+            "Ref": "CodeS3Bucket"
+          },
+          "S3Key": {
+            "Ref": "CodeS3Key"
+          },
+          "S3ObjectVersion": {
+            "Fn::If": [
+              "HasCodeVersion",
+              {
+                "Ref": "CodeS3ObjectVersion"
+              },
+              {
+                "Ref": "AWS::NoValue"
+              }
+            ]
+          }
+        },
+        "Role": {
+          "Fn::GetAtt": [
+            "RuntimeRole",
+            "Arn"
+          ]
+        },
+        "Timeout": 300,
+        "MemorySize": 512,
+        "ReservedConcurrentExecutions": 1,
+        "Environment": {
+          "Variables": {
+            "NODE_ENV": "production",
+            "BETER_BACKEND": "aws",
+            "BETER_ENVIRONMENT": {
+              "Ref": "Environment"
+            },
+            "BETER_DATA_MODE": {
+              "Ref": "DataMode"
+            },
+            "SITE_URL": {
+              "Ref": "SiteOrigin"
+            },
+            "ALLOWED_ORIGINS": {
+              "Ref": "SiteOrigin"
+            },
+            "AWS_DATABASE_NAME": "beter",
+            "AWS_DATABASE_RESOURCE_ARN": {
+              "Fn::GetAtt": [
+                "DatabaseCluster",
+                "DBClusterArn"
+              ]
+            },
+            "AWS_DATABASE_SECRET_ARN": {
+              "Ref": "AppDatabaseSecret"
+            },
+            "BETER_RUNTIME_SECRET_ARN": {
+              "Ref": "RuntimeSecretArn"
+            },
+            "AWS_COGNITO_USER_POOL_ID": {
+              "Ref": "UserPool"
+            },
+            "AWS_COGNITO_CLIENT_ID": {
+              "Ref": "UserPoolClient"
+            },
+            "BETER_SUPPORT_URL": {
+              "Ref": "SupportUrl"
+            },
+            "BETER_PRIVACY_URL": {
+              "Ref": "PrivacyUrl"
+            },
+            "BETER_ACCOUNT_DELETION_URL": {
+              "Ref": "AccountDeletionUrl"
+            },
+            "BETER_AWS_TASK": "process"
+          }
+        },
+        "LoggingConfig": {
+          "LogFormat": "JSON",
+          "LogGroup": {
+            "Ref": "WorkerLogGroup"
+          }
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      }
+    },
+    "WorkerInvokeConfig": {
+      "Type": "AWS::Lambda::EventInvokeConfig",
+      "Properties": {
+        "FunctionName": {
+          "Ref": "WorkerFunction"
+        },
+        "Qualifier": "$LATEST",
+        "MaximumEventAgeInSeconds": 60,
+        "MaximumRetryAttempts": 0,
+        "DestinationConfig": {
+          "OnFailure": {
+            "Destination": {
+              "Ref": "NotificationTopic"
+            }
+          }
+        }
+      }
+    },
+    "MonitorFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": {
+          "Fn::Sub": "${AppName}-${Environment}-monitor"
+        },
+        "Runtime": "nodejs24.x",
+        "Architectures": [
+          "arm64"
+        ],
+        "Handler": "index.handler",
+        "Code": {
+          "S3Bucket": {
+            "Ref": "CodeS3Bucket"
+          },
+          "S3Key": {
+            "Ref": "CodeS3Key"
+          },
+          "S3ObjectVersion": {
+            "Fn::If": [
+              "HasCodeVersion",
+              {
+                "Ref": "CodeS3ObjectVersion"
+              },
+              {
+                "Ref": "AWS::NoValue"
+              }
+            ]
+          }
+        },
+        "Role": {
+          "Fn::GetAtt": [
+            "RuntimeRole",
+            "Arn"
+          ]
+        },
+        "Timeout": 30,
+        "MemorySize": 256,
+        "ReservedConcurrentExecutions": 1,
+        "Environment": {
+          "Variables": {
+            "NODE_ENV": "production",
+            "BETER_BACKEND": "aws",
+            "BETER_ENVIRONMENT": {
+              "Ref": "Environment"
+            },
+            "BETER_DATA_MODE": {
+              "Ref": "DataMode"
+            },
+            "SITE_URL": {
+              "Ref": "SiteOrigin"
+            },
+            "ALLOWED_ORIGINS": {
+              "Ref": "SiteOrigin"
+            },
+            "AWS_DATABASE_NAME": "beter",
+            "AWS_DATABASE_RESOURCE_ARN": {
+              "Fn::GetAtt": [
+                "DatabaseCluster",
+                "DBClusterArn"
+              ]
+            },
+            "AWS_DATABASE_SECRET_ARN": {
+              "Ref": "AppDatabaseSecret"
+            },
+            "BETER_RUNTIME_SECRET_ARN": {
+              "Ref": "RuntimeSecretArn"
+            },
+            "AWS_COGNITO_USER_POOL_ID": {
+              "Ref": "UserPool"
+            },
+            "AWS_COGNITO_CLIENT_ID": {
+              "Ref": "UserPoolClient"
+            },
+            "BETER_SUPPORT_URL": {
+              "Ref": "SupportUrl"
+            },
+            "BETER_PRIVACY_URL": {
+              "Ref": "PrivacyUrl"
+            },
+            "BETER_ACCOUNT_DELETION_URL": {
+              "Ref": "AccountDeletionUrl"
+            },
+            "BETER_AWS_TASK": "monitor"
+          }
+        },
+        "LoggingConfig": {
+          "LogFormat": "JSON",
+          "LogGroup": {
+            "Ref": "MonitorLogGroup"
+          }
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      }
+    },
+    "MonitorInvokeConfig": {
+      "Type": "AWS::Lambda::EventInvokeConfig",
+      "Properties": {
+        "FunctionName": {
+          "Ref": "MonitorFunction"
+        },
+        "Qualifier": "$LATEST",
+        "MaximumEventAgeInSeconds": 60,
+        "MaximumRetryAttempts": 0,
+        "DestinationConfig": {
+          "OnFailure": {
+            "Destination": {
+              "Ref": "NotificationTopic"
+            }
+          }
+        }
+      }
+    },
+    "HttpApi": {
+      "Type": "AWS::ApiGatewayV2::Api",
+      "Properties": {
+        "Name": {
+          "Fn::Sub": "${AppName}-${Environment}"
+        },
+        "ProtocolType": "HTTP",
+        "DisableExecuteApiEndpoint": false,
+        "Tags": {
+          "Project": {
+            "Ref": "AppName"
+          },
+          "Environment": {
+            "Ref": "Environment"
+          }
+        }
+      }
+    },
+    "ApiIntegration": {
+      "Type": "AWS::ApiGatewayV2::Integration",
+      "Properties": {
+        "ApiId": {
+          "Ref": "HttpApi"
+        },
+        "IntegrationType": "AWS_PROXY",
+        "IntegrationUri": {
+          "Fn::GetAtt": [
+            "ApiFunction",
+            "Arn"
+          ]
+        },
+        "PayloadFormatVersion": "2.0",
+        "TimeoutInMillis": 29000
+      }
+    },
+    "ApiRoute": {
+      "Type": "AWS::ApiGatewayV2::Route",
+      "Properties": {
+        "ApiId": {
+          "Ref": "HttpApi"
+        },
+        "RouteKey": "$default",
+        "Target": {
+          "Fn::Join": [
+            "",
+            [
+              "integrations/",
+              {
+                "Ref": "ApiIntegration"
+              }
+            ]
+          ]
+        }
+      }
+    },
+    "ApiStage": {
+      "Type": "AWS::ApiGatewayV2::Stage",
+      "Properties": {
+        "ApiId": {
+          "Ref": "HttpApi"
+        },
+        "StageName": "$default",
+        "AutoDeploy": true,
+        "DefaultRouteSettings": {
+          "ThrottlingBurstLimit": 20,
+          "ThrottlingRateLimit": 10,
+          "DetailedMetricsEnabled": false
+        }
+      }
+    },
+    "ApiInvokePermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Ref": "ApiFunction"
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Sub": "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*"
+        }
+      }
+    },
+    "SchedulerRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "scheduler.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole",
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": {
+                    "Ref": "AWS::AccountId"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "InvokeBeterSchedules",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": "lambda:InvokeFunction",
+                  "Resource": [
+                    {
+                      "Fn::GetAtt": [
+                        "WorkerFunction",
+                        "Arn"
+                      ]
+                    },
+                    {
+                      "Fn::GetAtt": [
+                        "MonitorFunction",
+                        "Arn"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      }
+    },
+    "ProcessSchedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Description": "Beter process; disabled until migrations and configuration are verified.",
+        "ScheduleExpression": "rate(1 minute)",
+        "State": {
+          "Ref": "ScheduleState"
+        },
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "WorkerFunction",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": "{\"source\":\"beter.scheduler\",\"task\":\"process\"}",
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "MonitorSchedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Description": "Beter monitor; disabled until migrations and configuration are verified.",
+        "ScheduleExpression": "rate(1 minute)",
+        "State": {
+          "Ref": "ScheduleState"
+        },
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "MonitorFunction",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": "{\"source\":\"beter.scheduler\",\"task\":\"monitor\"}",
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "WorkerHeartbeatAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "Missing or unsuccessful Beter WorkerSuccess; actual delivery must be rehearsed.",
+        "Namespace": "Beter",
+        "MetricName": "WorkerSuccess",
+        "Dimensions": [
+          {
+            "Name": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ],
+        "Statistic": "Minimum",
+        "Period": 60,
+        "EvaluationPeriods": 3,
+        "DatapointsToAlarm": 3,
+        "Threshold": 1,
+        "ComparisonOperator": "LessThanThreshold",
+        "TreatMissingData": "breaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopic"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopic"
+          }
+        ]
+      }
+    },
+    "ReadinessAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "Missing or unsuccessful Beter ReadinessSuccess; actual delivery must be rehearsed.",
+        "Namespace": "Beter",
+        "MetricName": "ReadinessSuccess",
+        "Dimensions": [
+          {
+            "Name": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ],
+        "Statistic": "Minimum",
+        "Period": 60,
+        "EvaluationPeriods": 2,
+        "DatapointsToAlarm": 2,
+        "Threshold": 1,
+        "ComparisonOperator": "LessThanThreshold",
+        "TreatMissingData": "breaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopic"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationTopic"
+          }
+        ]
+      }
+    },
+    "ApiErrorsAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "Namespace": "AWS/Lambda",
+        "MetricName": "Errors",
+        "Dimensions": [
+          {
+            "Name": "FunctionName",
+            "Value": {
+              "Ref": "ApiFunction"
+            }
+          }
+        ],
+        "Statistic": "Sum",
+        "Period": 60,
+        "EvaluationPeriods": 2,
+        "Threshold": 1,
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "NotificationTopic"
+          }
+        ]
+      }
+    },
+    "AssetsBucket": {
+      "Type": "AWS::S3::Bucket",
+      "Properties": {
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        },
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256"
+              }
+            }
+          ]
+        },
+        "OwnershipControls": {
+          "Rules": [
+            {
+              "ObjectOwnership": "BucketOwnerEnforced"
+            }
+          ]
+        },
+        "VersioningConfiguration": {
+          "Status": "Enabled"
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      },
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain"
+    },
+    "AssetsOac": {
+      "Type": "AWS::CloudFront::OriginAccessControl",
+      "Properties": {
+        "OriginAccessControlConfig": {
+          "Name": {
+            "Fn::Sub": "${AppName}-${Environment}-assets"
+          },
+          "OriginAccessControlOriginType": "s3",
+          "SigningBehavior": "always",
+          "SigningProtocol": "sigv4"
+        }
+      }
+    },
+    "StagingGate": {
+      "Type": "AWS::CloudFront::Function",
+      "Properties": {
+        "Name": {
+          "Fn::Sub": "${AppName}-${Environment}-gate"
+        },
+        "AutoPublish": true,
+        "FunctionConfig": {
+          "Comment": "Default-closed staging, hashed access check, and funding cutoff.",
+          "Runtime": "cloudfront-js-2.0"
+        },
+        "FunctionCode": {
+          "Fn::Sub": "function handler(event) {\n  var request = event.request;\n  var cutoff = Date.parse('${CreditCutoffAt}Z');\n  if (!isFinite(cutoff) || Date.now() >= cutoff) return {statusCode:503,statusDescription:'Service unavailable',headers:{'cache-control':{value:'no-store'},'content-type':{value:'text/plain; charset=utf-8'}},body:'This environment is paused for a funding review.'};\n  var authorization = request.headers.authorization;\n  var machine = request.headers['x-beter-staging-access'];\n  var candidate = machine ? machine.value : authorization ? authorization.value : '';\n  if ('${LaunchOpen}' !== 'true') {\n    var crypto = require('crypto');\n    if (!candidate || crypto.createHash('sha256').update(candidate).digest('hex') !== '${StagingAuthorizationHash}') return {statusCode:401,statusDescription:'Authentication required',headers:{'www-authenticate':{value:'Basic realm=\"Beter staging\", charset=\"UTF-8\"'},'cache-control':{value:'no-store'},'content-type':{value:'text/plain; charset=utf-8'}},body:'This staging environment requires access credentials.'};\n  }\n  if (authorization && authorization.value.indexOf('Basic ') === 0) delete request.headers.authorization;\n  delete request.headers['x-beter-staging-access'];\n  request.headers['x-beter-viewer-ip'] = {value:event.viewer.ip};\n  return request;\n}"
+        }
+      }
+    },
+    "ApiForwardingPolicy": {
+      "Type": "AWS::CloudFront::OriginRequestPolicy",
+      "Properties": {
+        "OriginRequestPolicyConfig": {
+          "Name": {
+            "Fn::Sub": "${AppName}-${Environment}-api"
+          },
+          "CookiesConfig": {
+            "CookieBehavior": "all"
+          },
+          "QueryStringsConfig": {
+            "QueryStringBehavior": "all"
+          },
+          "HeadersConfig": {
+            "HeaderBehavior": "allExcept",
+            "Headers": [
+              "host"
+            ]
+          }
+        }
+      }
+    },
+    "AssetsCachePolicy": {
+      "Type": "AWS::CloudFront::CachePolicy",
+      "Properties": {
+        "CachePolicyConfig": {
+          "Name": {
+            "Fn::Sub": "${AppName}-${Environment}-assets"
+          },
+          "MinTTL": 0,
+          "DefaultTTL": 300,
+          "MaxTTL": 86400,
+          "ParametersInCacheKeyAndForwardedToOrigin": {
+            "EnableAcceptEncodingBrotli": true,
+            "EnableAcceptEncodingGzip": true,
+            "CookiesConfig": {
+              "CookieBehavior": "none"
+            },
+            "HeadersConfig": {
+              "HeaderBehavior": "none"
+            },
+            "QueryStringsConfig": {
+              "QueryStringBehavior": "none"
+            }
+          }
+        }
+      }
+    },
+    "SecurityHeaders": {
+      "Type": "AWS::CloudFront::ResponseHeadersPolicy",
+      "Properties": {
+        "ResponseHeadersPolicyConfig": {
+          "Name": {
+            "Fn::Sub": "${AppName}-${Environment}-security"
+          },
+          "SecurityHeadersConfig": {
+            "ContentTypeOptions": {
+              "Override": true
+            },
+            "FrameOptions": {
+              "FrameOption": "DENY",
+              "Override": true
+            },
+            "ReferrerPolicy": {
+              "ReferrerPolicy": "strict-origin-when-cross-origin",
+              "Override": true
+            },
+            "StrictTransportSecurity": {
+              "AccessControlMaxAgeSec": 31536000,
+              "IncludeSubdomains": false,
+              "Preload": false,
+              "Override": true
+            },
+            "ContentSecurityPolicy": {
+              "ContentSecurityPolicy": "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+              "Override": true
+            }
+          },
+          "CustomHeadersConfig": {
+            "Items": [
+              {
+                "Header": "Permissions-Policy",
+                "Value": "camera=(), microphone=(), geolocation=()",
+                "Override": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    "Distribution": {
+      "Type": "AWS::CloudFront::Distribution",
+      "Properties": {
+        "DistributionConfig": {
+          "Enabled": true,
+          "Comment": {
+            "Fn::Sub": "Beter ${Environment}; access closed until approved."
+          },
+          "DefaultRootObject": "index.html",
+          "HttpVersion": "http2and3",
+          "IPV6Enabled": true,
+          "PriceClass": "PriceClass_100",
+          "Aliases": {
+            "Fn::If": [
+              "HasDomain",
+              [
+                {
+                  "Ref": "CustomDomainName"
+                }
+              ],
+              {
+                "Ref": "AWS::NoValue"
+              }
+            ]
+          },
+          "ViewerCertificate": {
+            "Fn::If": [
+              "HasDomain",
+              {
+                "AcmCertificateArn": {
+                  "Ref": "AcmCertificateArn"
+                },
+                "SslSupportMethod": "sni-only",
+                "MinimumProtocolVersion": "TLSv1.2_2021"
+              },
+              {
+                "CloudFrontDefaultCertificate": true
+              }
+            ]
+          },
+          "Origins": [
+            {
+              "Id": "assets",
+              "DomainName": {
+                "Fn::GetAtt": [
+                  "AssetsBucket",
+                  "RegionalDomainName"
+                ]
+              },
+              "S3OriginConfig": {
+                "OriginAccessIdentity": ""
+              },
+              "OriginAccessControlId": {
+                "Ref": "AssetsOac"
+              }
+            },
+            {
+              "Id": "api",
+              "DomainName": {
+                "Fn::Sub": "${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}"
+              },
+              "CustomOriginConfig": {
+                "OriginProtocolPolicy": "https-only",
+                "OriginSSLProtocols": [
+                  "TLSv1.2"
+                ]
+              },
+              "OriginCustomHeaders": [
+                {
+                  "HeaderName": "x-beter-origin-secret",
+                  "HeaderValue": {
+                    "Fn::Sub": "{{resolve:secretsmanager:${RuntimeSecretArn}:SecretString:originSecret}}"
+                  }
+                }
+              ]
+            }
+          ],
+          "DefaultCacheBehavior": {
+            "TargetOriginId": "assets",
+            "ViewerProtocolPolicy": "redirect-to-https",
+            "AllowedMethods": [
+              "GET",
+              "HEAD",
+              "OPTIONS"
+            ],
+            "CachedMethods": [
+              "GET",
+              "HEAD"
+            ],
+            "Compress": true,
+            "CachePolicyId": {
+              "Ref": "AssetsCachePolicy"
+            },
+            "ResponseHeadersPolicyId": {
+              "Ref": "SecurityHeaders"
+            },
+            "FunctionAssociations": [
+              {
+                "EventType": "viewer-request",
+                "FunctionARN": {
+                  "Fn::GetAtt": [
+                    "StagingGate",
+                    "FunctionARN"
+                  ]
+                }
+              }
+            ]
+          },
+          "CacheBehaviors": [
+            {
+              "TargetOriginId": "api",
+              "ViewerProtocolPolicy": "redirect-to-https",
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+                "PUT",
+                "PATCH",
+                "POST",
+                "DELETE"
+              ],
+              "CachedMethods": [
+                "GET",
+                "HEAD"
+              ],
+              "Compress": true,
+              "CachePolicyId": "413f1603-3b52-45a9-9a26-24a70246d627",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeaders"
+              },
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "StagingGate",
+                      "FunctionARN"
+                    ]
+                  }
+                }
+              ],
+              "OriginRequestPolicyId": {
+                "Ref": "ApiForwardingPolicy"
+              },
+              "PathPattern": "/api/*"
+            },
+            {
+              "TargetOriginId": "api",
+              "ViewerProtocolPolicy": "redirect-to-https",
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+                "PUT",
+                "PATCH",
+                "POST",
+                "DELETE"
+              ],
+              "CachedMethods": [
+                "GET",
+                "HEAD"
+              ],
+              "Compress": true,
+              "CachePolicyId": "413f1603-3b52-45a9-9a26-24a70246d627",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeaders"
+              },
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "StagingGate",
+                      "FunctionARN"
+                    ]
+                  }
+                }
+              ],
+              "OriginRequestPolicyId": {
+                "Ref": "ApiForwardingPolicy"
+              },
+              "PathPattern": "/api"
+            }
+          ]
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      }
+    },
+    "AssetsPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Properties": {
+        "Bucket": {
+          "Ref": "AssetsBucket"
+        },
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "cloudfront.amazonaws.com"
+              },
+              "Action": "s3:GetObject",
+              "Resource": {
+                "Fn::Sub": "${AssetsBucket.Arn}/*"
+              },
+              "Condition": {
+                "StringEquals": {
+                  "AWS:SourceArn": {
+                    "Fn::Sub": "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
+                  }
+                }
+              }
+            },
+            {
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:*",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "AssetsBucket",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::Sub": "${AssetsBucket.Arn}/*"
+                }
+              ],
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "CloudFrontDomain": {
+      "Value": {
+        "Fn::GetAtt": [
+          "Distribution",
+          "DomainName"
+        ]
+      }
+    },
+    "DistributionId": {
+      "Value": {
+        "Ref": "Distribution"
+      }
+    },
+    "AssetsBucketName": {
+      "Value": {
+        "Ref": "AssetsBucket"
+      }
+    },
+    "ApiEndpoint": {
+      "Value": {
+        "Fn::GetAtt": [
+          "HttpApi",
+          "ApiEndpoint"
+        ]
+      }
+    },
+    "DatabaseClusterArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "DatabaseCluster",
+          "DBClusterArn"
+        ]
+      }
+    },
+    "DatabaseName": {
+      "Value": "beter"
+    },
+    "DatabaseAppSecretArn": {
+      "Value": {
+        "Ref": "AppDatabaseSecret"
+      }
+    },
+    "DatabaseMasterSecretArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "DatabaseCluster",
+          "MasterUserSecret.SecretArn"
+        ]
+      }
+    },
+    "UserPoolId": {
+      "Value": {
+        "Ref": "UserPool"
+      }
+    },
+    "UserPoolClientId": {
+      "Value": {
+        "Ref": "UserPoolClient"
+      }
+    },
+    "UserPoolDomain": {
+      "Value": {
+        "Fn::Sub": "${AppName}-${Environment}-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com"
+      }
+    },
+    "WorkerFunctionName": {
+      "Value": {
+        "Ref": "WorkerFunction"
+      }
+    },
+    "MonitorFunctionName": {
+      "Value": {
+        "Ref": "MonitorFunction"
+      }
+    },
+    "AlertTopicArn": {
+      "Value": {
+        "Ref": "NotificationTopic"
+      }
+    },
+    "LaunchOpen": {
+      "Value": {
+        "Ref": "LaunchOpen"
+      }
+    },
+    "CreditCutoffAt": {
+      "Value": {
+        "Ref": "CreditCutoffAt"
+      }
+    }
+  }
+}
