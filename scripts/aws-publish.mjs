@@ -30,14 +30,25 @@ export async function publishDeployment({root=projectRoot,privateDir=join(root,'
  const remoteParameters=Object.fromEntries((stack.Parameters||[]).map(parameter=>[parameter.ParameterKey,parameter.ParameterValue]));
  if(remoteParameters.Environment!=='staging'||remoteParameters.LaunchOpen!=='false'||remoteParameters.ScheduleState!=='DISABLED'||remoteParameters.CreditsVerified!=='true'||remoteParameters.CreditCutoffAt!==state.cutoffAt)throw Error('The hosted stack must match the reviewed closed staging plan.');
  const outputs=Object.fromEntries((stack.Outputs||[]).map(output=>[output.OutputKey,output.OutputValue]));
- if(!/^[a-z0-9]+\.cloudfront\.net$/.test(outputs.CloudFrontDomain||'')||!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(outputs.AssetsBucketName||'')||!/^[A-Z0-9]+$/.test(outputs.DistributionId||''))throw Error('The completed staging stack has incomplete public publishing outputs.');
- for(const asset of manifest.assets)await control.call('s3api','put-object',{Bucket:outputs.AssetsBucketName,Key:asset.key,ContentType:asset.contentType,CacheControl:asset.cacheControl,ServerSideEncryption:'AES256'},['--body',asset.sourcePath,...region]);
- const siteOrigin='https://'+outputs.CloudFrontDomain,updateStarted=remoteParameters.SiteOrigin!==siteOrigin;
- if(updateStarted)await control.call('cloudformation','update-stack',{StackName:state.stackId,UsePreviousTemplate:true,Parameters:Object.keys(parameters).map(ParameterKey=>ParameterKey==='SiteOrigin'?{ParameterKey,ParameterValue:siteOrigin}:{ParameterKey,UsePreviousValue:true}),Capabilities:['CAPABILITY_IAM'],ClientRequestToken:randomUUID()},region);
- state.parameters={...parameters,SiteOrigin:siteOrigin};state.outputs=outputs;
+ const freeGateway=remoteParameters.FreeGatewayHosting==='true';let siteOrigin;
+ if(freeGateway){
+  let origin;try{origin=new URL(outputs.PublicGatewayOrigin);}catch{throw Error('The completed stack has no valid gateway origin.');}
+  const suffix='.execute-api.'+state.region+'.amazonaws.com';
+  if(origin.protocol!=='https:'||origin.port||origin.username||origin.password||origin.pathname!=='/'||origin.search||origin.hash||!(/^[a-z0-9]+$/.test(origin.hostname.split('.')[0]))||![suffix,suffix+'.cn'].some(ending=>origin.hostname===origin.hostname.split('.')[0]+ending))throw Error('The completed stack has an invalid gateway origin.');
+  siteOrigin=origin.origin;
+ }else{
+  if(parameters.FreeGatewayHosting==='true')throw Error('The hosted gateway origin does not match the reviewed hosting mode.');
+  if(!/^[a-z0-9]+\.cloudfront\.net$/.test(outputs.CloudFrontDomain||'')||!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(outputs.AssetsBucketName||'')||!/^[A-Z0-9]+$/.test(outputs.DistributionId||''))throw Error('The completed staging stack has incomplete public publishing outputs.');
+  for(const asset of manifest.assets)await control.call('s3api','put-object',{Bucket:outputs.AssetsBucketName,Key:asset.key,ContentType:asset.contentType,CacheControl:asset.cacheControl,ServerSideEncryption:'AES256'},['--body',asset.sourcePath,...region]);
+  siteOrigin='https://'+outputs.CloudFrontDomain;
+ }
+ const updateStarted=remoteParameters.SiteOrigin!==siteOrigin;
+ const preservedParameters={...parameters,...(remoteParameters.FreeGatewayHosting===undefined?{}:{FreeGatewayHosting:remoteParameters.FreeGatewayHosting})};
+ if(updateStarted)await control.call('cloudformation','update-stack',{StackName:state.stackId,UsePreviousTemplate:true,Parameters:Object.keys(preservedParameters).map(ParameterKey=>ParameterKey==='SiteOrigin'?{ParameterKey,ParameterValue:siteOrigin}:{ParameterKey,UsePreviousValue:true}),Capabilities:['CAPABILITY_IAM'],ClientRequestToken:randomUUID()},region);
+ state.parameters={...preservedParameters,SiteOrigin:siteOrigin};state.outputs=outputs;
  await mkdir(privateDir,{recursive:true,mode:0o700});await chmod(privateDir,0o700);const pending=join(privateDir,randomUUID()+'.state.json');await writeFile(pending,JSON.stringify(state,null,2)+'\n',{mode:0o600});await rename(pending,statePath);
- await control.call('cloudfront','create-invalidation',{DistributionId:outputs.DistributionId,InvalidationBatch:{CallerReference:randomUUID(),Paths:{Quantity:1,Items:['/*']}}});
- return{stackName:state.stackName,url:siteOrigin,assets:manifest.assets.length,updateStarted,launchOpen:false,schedules:'DISABLED'};
+ if(!freeGateway)await control.call('cloudfront','create-invalidation',{DistributionId:outputs.DistributionId,InvalidationBatch:{CallerReference:randomUUID(),Paths:{Quantity:1,Items:['/*']}}});
+ return{stackName:state.stackName,url:siteOrigin,hosting:freeGateway?'gateway':'cloudfront',assets:manifest.assets.length,updateStarted,launchOpen:false,schedules:'DISABLED'};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
  try{console.log(JSON.stringify({ok:true,...await publishDeployment()}));}catch(error){console.error(JSON.stringify({ok:false,message:error instanceof Error?error.message:'AWS publishing failed.'}));process.exitCode=1;}
