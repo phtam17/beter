@@ -8,7 +8,7 @@ type Options={loadAssets:()=>Promise<AssetMap>;env?:Record<string,string|undefin
 export const awsSecurityHeaders={
   'x-content-type-options':'nosniff','x-frame-options':'DENY','referrer-policy':'strict-origin-when-cross-origin',
   'strict-transport-security':'max-age=31536000','permissions-policy':'camera=(), microphone=(), geolocation=()',
-  'content-security-policy':"default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+  'content-security-policy':"default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
 };
 function response(statusCode:number,message:string,headers:Record<string,string>={}):AwsHttpResponse{
   return{statusCode,headers:{...awsSecurityHeaders,'content-type':'text/plain; charset=utf-8','cache-control':'no-store',...headers},body:message,isBase64Encoded:false};
