@@ -39,4 +39,4 @@ Public API mode is enabled with `BETER_PUBLIC_GATEWAY=true` or the explicit fact
 
 The current [AWS HTTP API Lambda integration documentation](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-develop-integrations-lambda.html) was checked before implementation. Its payload2.0 metadata and separate response cookie list underpin the sourceIp/cookie handling. Incoming request headers are not trusted as Gateway metadata.
 
-Actual AWS integration/deployment, free hostname reachability, packaged byte verification, IAM enforcement, staging browser navigation, email/account journeys and launch checks remain hosted verification. The earlier CloudFront-specific hosted checker must select the new public Gateway topology before being used for a final report.
+Actual AWS integration/deployment, free hostname reachability, packaged byte verification, IAM enforcement, staging browser navigation, email/account journeys and launch checks remain hosted verification. The hosted checker now selects the public Gateway topology from reviewed state; its update is recorded in `aws-hosted-checks.md`.

@@ -1,5 +1,13 @@
 # Closed AWS staging verification: TDD evidence
 
+## Free Gateway topology update
+
+The current default is the free API Gateway hostname. RED `efb7a8d`:12 cases executed,7 pass /5 fail because the checker required CloudFront and had no delivered-script check. GREEN `7bacd50`:same12 cases pass. The current coverage command below reports **93.46% lines /86.55% branches /92.50% functions**.
+
+When `parameters.FreeGatewayHosting` is not `'false'`, the checker requires `outputs.PublicGatewayOrigin` to exactly match the validated HTTPS `outputs.ApiEndpoint` and sends no traffic to disabled CloudFront. Its bare public API request must encounter the staging401/403 gate; that origin is now the intended public website. Explicit CloudFront mode retains the separate direct-origin403 check.
+
+The current default is **13 checks using12 GET requests**, including `/app.js` JavaScript-module delivery. `--auth-probes` adds two synthetic POST checks for15 total checks. The output identifies `topology` and continues to keep `publicLaunchReady:false`. Malformed/missing/mismatched free endpoint outputs are rejected before access details are sent. The historical checkpoint records below describe the earlier CloudFront-only implementation.
+
 Derived journey: verify the deployed private staging perimeter, AWS sample configuration, schema/ledger health, public/private endpoints, secure cookie clearing, and safe account rejection without leaking access details. This tool does not declare the application ready for public launch.
 
 ## Checkpoints
