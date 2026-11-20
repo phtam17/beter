@@ -39,3 +39,9 @@ test('setup intent is scrubbed immediately and survives early AWS configuration 
 test('invalid setup email is removed from the address and ignored without auth or email actions',async({page})=>{
   const api=await setup(page,{fragment:'not-an-email'});await expect(page).not.toHaveURL(/setup-password|not-an-email/);await expect(page.locator('#auth-dialog')).not.toBeVisible();expect(api.calls.filter(call=>call.body)).toHaveLength(0);
 });
+test('cancelling a filled setup form clears code/password and does not retain setup intent when sign-in is reopened',async({page})=>{
+  const api=await setup(page);await fill(page);await page.keyboard.press('Escape');await expect(page.locator('#auth-dialog')).not.toBeVisible();await expect(page.locator('#auth-code')).toHaveValue('');await expect(page.locator('#auth-password')).toHaveValue('');await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.getByRole('dialog',{name:'Sign in to Beter',exact:true})).toBeVisible();await expect(page.getByLabel('Password',{exact:true})).toHaveValue('');expect(api.calls.filter(call=>call.body)).toHaveLength(0);
+});
+test('a setup fragment opened in an existing app page is consumed and focuses the same explicit setup form',async({page})=>{
+  const api=await setup(page,{fragment:'not-an-email'});await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.evaluate(email=>{location.hash='setup-password='+encodeURIComponent(email);},email);await expect(page.getByRole('dialog',{name:'Set your password',exact:true})).toBeVisible();await expect(page).not.toHaveURL(/setup-password|setup%40/);await expect(page.getByLabel('Verification code',{exact:true})).toBeFocused();expect(api.calls.filter(call=>call.body)).toHaveLength(0);
+});
