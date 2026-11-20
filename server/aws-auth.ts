@@ -174,7 +174,7 @@ export function createCognitoAuthBackend({region,clientId,store,secret,client,no
       const provider=resultTokens(await invoke(new InitiateAuthCommand({AuthFlow:'USER_PASSWORD_AUTH',ClientId:clientId,AuthParameters:{USERNAME:email,PASSWORD:password(body.password)}}),deadline));
       const user=await identity(provider.accessToken,deadline);
       const access=hex(crypto.getRandomValues(new Uint8Array(32))),refresh=hex(crypto.getRandomValues(new Uint8Array(32))),time=timestamp();
-      const session:AwsAuthSession={accessHash:await digest(access),refreshHash:await digest(refresh),userId:user.id,sealedTokens:await seal({...provider,userId:user.id}),accessExpiresAt:time+provider.expiresIn*1000,refreshExpiresAt:time+refreshTtlMs,previousAccessHash:null,previousRefreshHash:null};
+      const session:AwsAuthSession={accessHash:await digest(access),refreshHash:await digest(refresh),userId:user.id,sealedTokens:await seal({...provider,userId:user.id}),accessExpiresAt:time+Math.min(provider.expiresIn*1000,refreshTtlMs),refreshExpiresAt:time+refreshTtlMs,previousAccessHash:null,previousRefreshHash:null};
       await store.upsertUser(user);await store.createSession(session);
       return publicResult(access,refresh,session,user);
     }catch(error){throw safeError(error);}
