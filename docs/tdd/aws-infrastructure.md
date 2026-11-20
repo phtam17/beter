@@ -52,3 +52,13 @@ The user chose an AWS-generated public hostname. Official [HTTP API security doc
 The focused template/package/publisher run passed 29/29 cases. Package coverage was 94.64% lines/94.74% branches/100% functions; publisher coverage was 96.36% lines/83.33% branches/100% functions. The composed real package imported the static handler and rejected access without deployment configuration. Its then-current ZIP was 389,967 bytes and minimized template 39,284 bytes, with ten reviewed public assets. Regenerate hashes after subsequent changes. API/static handler behavior tests are maintained with their implementation.
 
 Hosted operations/backup-rehearsal tests were checkpointed at `c733452` with valid RED failures before implementation, then paused explicitly to prioritize this hosting change. They do not establish a completed operations or restore check.
+
+## Hosted operations and recovery helper
+
+Operations/recovery implementation resumed after the hosting work. `0e84c94` passed the original seven cases introduced by `c733452`. `411c6a0` added state-transition and cleanup cases and exposed the actual AWS snapshot-not-found cleanup path; `ab8f78a` made all ten cases pass. `13f612a` added failure-path coverage and a failing CLI exit-status contract; `706c5ea` made all seventeen operations cases pass. Operations coverage is 100% lines, 82.76% branches, and 97.78% functions. The CLI branch that starts the default process is kept separate from injected fixture execution; no AWS resources were created by these tests.
+
+The tests cover actual-service response interpretation, unconfirmed SNS subscriptions, empty/stale/failing metrics, account/source drift, open/unfinished stack rejection, ingress/NAT isolation, private-state preservation, funding cutoff, tagged encrypted snapshot provenance, staged clone configuration, exact schema/count proof comparison, and explicit disposable cleanup order. A malformed test fixture that changed the fake lookup identity was corrected before the final coverage run; it is not claimed as a production regression.
+
+The stable sample clock was added after `d147b45` RED → `0c79adb` GREEN. A live-mode regression in `281a48d` then failed because empty/default sample overrides were still passed to live functions; `6cf2ca8` removed both keys through `AWS::NoValue`. Fifteen infrastructure cases pass.
+
+A composed static bundle check with a synthetic valid gate returned byte-exact/MIME-correct content for all ten GET asset requests, empty bodies with correct MIME for all ten HEAD requests, and 200 for `/`. These are local artifact checks. Actual operations reports, SNS confirmation/delivery, CloudWatch extraction, and recovered-database proof must still come from the hosted run.

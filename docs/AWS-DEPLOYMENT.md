@@ -65,3 +65,24 @@ Use the free `PublicGatewayOrigin` output as the site address and provide a veri
 The default free HTTP API hostname enforces TLS 1.2 and accepts TLS 1.3; verify the actual endpoint during hosted checks. See [HTTP API security policy](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-ciphers.html). If switching to optional CloudFront hosting for public production, supply a custom domain and a matching ACM certificate in `us-east-1` so that viewer connections can enforce `TLSv1.2_2021`; the default CloudFront certificate cannot enforce that minimum. The free-hostname option bypasses only the domain/certificate launch assertions.
 
 Complete and retain every applicable hosted check, verify credit runway and the next cutoff, confirm the alert destination, review load/abuse protection and quotas, and enable reviewed reservations before launch. `HostedChecksApproved=true` is an operator attestation after this evidence exists. Public opening also requires `Environment=production`, `DataMode=live`, and the SES, alert, and policy parameters (plus domain/certificate only for optional CloudFront hosting). Do not set this attestation merely because the local test suite passes.
+
+## Operations and disposable restore commands
+
+After the stack and runtime are ready, run `node scripts/aws-operations-checks.mjs check`. It reads the actual AWS database, security groups, routes, writer visibility, confirmed SNS email subscriptions, and the last fifteen minutes of worker/readiness metrics. Missing email confirmation or metrics is a failed check, not an inferred success. The command never confirms an SNS subscription. Its exit status is nonzero when required evidence is missing; its safe report is saved privately as `.data/aws-deploy/operations-report.json`.
+
+For a recovery rehearsal, stop other staging activity and leave schedules disabled. Ensure at least one hour remains before the funding cutoff. Run each command separately; `backup-advance` performs at most one next resource operation and returns a stage, so the operator can wait briefly and poll without a long-running waiter:
+
+```sh
+node scripts/aws-operations-checks.mjs backup-start --quiescent
+node scripts/aws-operations-checks.mjs backup-advance
+node scripts/aws-operations-checks.mjs backup-verify
+node scripts/aws-operations-checks.mjs backup-cleanup --delete-disposable
+```
+
+Repeat `backup-advance` until `READY_FOR_VERIFY`, then run `backup-verify`. Repeat the cleanup command until `CLEANED`. Do not start a second rehearsal over an existing recovery record. Cleanup remains available after the funding cutoff so disposable resources can be removed promptly.
+
+The start command records exact schema fingerprints and table row counts through the source Data API, then creates a tagged encrypted manual cluster snapshot. The restore uses that snapshot in the same private subnet/security groups. Subsequent advances configure a separate managed master credential, minimum 0/maximum 1 ACU, a private serverless writer, and the Data API. The Lambda/application runtime is not connected to this restored cluster. Verification queries the restored database and compares every recorded table count, table/constraint/index/policy fingerprint, function-definition fingerprint, and migration fingerprint. It records a proof hash and elapsed recovery time. This checks the captured schema/count baseline; it does not establish equality of every individual row value or a separate point-in-time recovery test.
+
+Private recovery identifiers and baseline results are saved before resource mutations in `.data/aws-deploy/backup-rehearsal.json` with mode 0600. Before deleting anything, cleanup requires the explicit disposable flag and checks account, source/snapshot/clone identity, and ownership tags. It deletes only the recorded rehearsal writer, then clone cluster, then manual snapshot, polling between phases. The live source is never a deletion target. If identity checks fail, inspect the private state and resource tags before making a cleanup decision. Record final absence of the temporary resources and inspect charges; the app funding fuse does not delete a rehearsal automatically.
+
+For isolated sample checks, set `SampleStartAt` to a fixed UTC instant and choose `SampleDurationSeconds` between 60 and 10,800. API, worker, and monitor share those values across cold starts, so the same event IDs can progress to settlement. In `DataMode=live`, both sample environment keys are omitted entirely.
