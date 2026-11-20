@@ -19,8 +19,8 @@ test('database has no public ingress and has bounded encrypted capacity and rete
 test('runtime uses supported Node, bounded functions, and cannot read database master credentials',()=>{
   const api=resource('ApiFunction').Properties;assert.equal(api.Runtime,'nodejs24.x');assert.ok(api.ReservedConcurrentExecutions);assert.ok(api.Timeout<=30);const policy=JSON.stringify(resource('RuntimeRole').Properties.Policies);assert.doesNotMatch(policy,/MasterUserSecret/);assert.doesNotMatch(policy,/'\*'/);assert.match(policy,/rds-data:ExecuteStatement/);assert.match(policy,/RuntimeSecretArn/);assert.ok(resource('WorkerFunction').Properties.ReservedConcurrentExecutions);assert.ok(resource('MonitorFunction').Properties.ReservedConcurrentExecutions);
 });
-test('Cognito is case-insensitive, immutable-email, gated, and uses link confirmation',()=>{
-  const pool=resource('UserPool').Properties;assert.deepEqual(pool.UsernameAttributes,['email']);assert.equal(pool.UsernameConfiguration.CaseSensitive,false);assert.equal(pool.Schema.find(field=>field.Name==='email').Mutable,false);assert.equal(pool.VerificationMessageTemplate.DefaultEmailOption,'CONFIRM_WITH_LINK');assert.ok(pool.LambdaConfig.PreSignUp);resource('UserPoolDomain');const client=resource('UserPoolClient').Properties;assert.equal(client.GenerateSecret,false);assert.ok(client.ExplicitAuthFlows.includes('ALLOW_USER_PASSWORD_AUTH'));assert.equal(client.RefreshTokenRotation.Feature,'DISABLED');
+test('Cognito is case-insensitive, immutable-email, gated, and uses signup codes',()=>{
+  const pool=resource('UserPool').Properties;assert.deepEqual(pool.UsernameAttributes,['email']);assert.equal(pool.UsernameConfiguration.CaseSensitive,false);assert.equal(pool.Schema.find(field=>field.Name==='email').Mutable,false);assert.equal(pool.VerificationMessageTemplate['Fn::If']?.[2]?.DefaultEmailOption,'CONFIRM_WITH_CODE');assert.ok(pool.LambdaConfig.PreSignUp);resource('UserPoolDomain');const client=resource('UserPoolClient').Properties;assert.equal(client.GenerateSecret,false);assert.ok(client.ExplicitAuthFlows.includes('ALLOW_USER_PASSWORD_AUTH'));assert.equal(client.RefreshTokenRotation.Feature,'DISABLED');
 });
 test('scheduling waits for migrations, has scoped invoke rights, and readiness/failure alarms',()=>{
   assert.equal(template.Parameters.ScheduleState.Default,'DISABLED');for(const name of ['ProcessSchedule','MonitorSchedule'])assert.ok(resource(name).Properties.Target.RetryPolicy);const policies=JSON.stringify(resource('SchedulerRole').Properties.Policies);assert.match(policies,/WorkerFunction/);assert.match(policies,/MonitorFunction/);assert.doesNotMatch(policies,/Resource":"\*"/);assert.equal(resource('WorkerHeartbeatAlarm').Properties.TreatMissingData,'breaching');assert.equal(resource('ReadinessAlarm').Properties.TreatMissingData,'breaching');resource('ApiErrorsAlarm');
@@ -78,4 +78,11 @@ test('AWS sample timing stays fixed across API worker and monitor cold starts wi
 test('live provider functions omit every sample override instead of passing empty or default values',()=>{
  assert.deepEqual(template.Conditions.IsSampleData,{'Fn::Equals':[{Ref:'DataMode'},'sample']});
  for(const name of ['ApiFunction','WorkerFunction','MonitorFunction'])for(const key of ['BETER_SAMPLE_START_AT','BETER_SAMPLE_DURATION_SECONDS'])assert.deepEqual(resource(name).Properties.Environment.Variables[key]['Fn::If']?.[2],{Ref:'AWS::NoValue'});
+});
+
+test('signup codes use the default Cognito message unless verified SES permits a custom template',()=>{
+ const verification=resource('UserPool').Properties.VerificationMessageTemplate;
+ assert.ok(verification['Fn::If'],'Sender-aware verification templates must be explicit.');
+ const [condition,ses,standard]=verification['Fn::If'];assert.equal(condition,'HasSes');assert.deepEqual(standard,{DefaultEmailOption:'CONFIRM_WITH_CODE'});assert.equal(ses.DefaultEmailOption,'CONFIRM_WITH_CODE');assert.match(ses.EmailMessage,/\{####\}/);assert.ok(ses.EmailSubject);assert.equal(ses.EmailMessageByLink,undefined);assert.equal(ses.EmailSubjectByLink,undefined);
+ const client=resource('UserPoolClient').Properties;assert.equal(client.AllowedOAuthFlows,undefined);assert.equal(client.CallbackURLs,undefined);
 });
