@@ -2344,7 +2344,7 @@
                 "HEAD"
               ],
               "Compress": true,
-              "CachePolicyId": "413f1603-3b52-45a9-9a26-24a70246d627",
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "ResponseHeadersPolicyId": {
                 "Ref": "SecurityHeaders"
               },
@@ -2381,7 +2381,7 @@
                 "HEAD"
               ],
               "Compress": true,
-              "CachePolicyId": "413f1603-3b52-45a9-9a26-24a70246d627",
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "ResponseHeadersPolicyId": {
                 "Ref": "SecurityHeaders"
               },
