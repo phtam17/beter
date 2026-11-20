@@ -92,8 +92,24 @@ test('a logout racing an in-flight refresh cannot resurrect its deleted session'
   const f=fixture({send:async(command,next)=>{if(command.input.AuthFlow==='REFRESH_TOKEN_AUTH'){entered();await barrier;}return next(command);}}),auth=f.adapter(),result=await auth.auth('signin',{email,password:'a-long-private-password'});f.advance(3600001);const refreshing=auth.auth('refresh',{refresh_token:result.session.refresh_token});await waiting;await auth.auth('signout',{},result.session.access_token);release();await assert.rejects(()=>refreshing,error=>error.status===401);assert.equal(f.sessions.size,0);
 });
 test('signup confirmation does not create a local user or authenticated session prematurely',async()=>{
-  const f=fixture(),auth=f.adapter();assert.deepEqual(await auth.auth('signup',{email,password:'a-long-private-password'}),{session:null,requiresConfirmation:true});assert.equal(f.calls[0].name,'SignUpCommand');assert.equal(f.sessions.size,0);assert.equal(f.users.size,0);
-  const existing=fixture({send:async()=>{throw providerError('UsernameExistsException');}});assert.deepEqual(await existing.adapter().auth('signup',{email,password:'a-long-private-password'}),{session:null,requiresConfirmation:true});
+  const f=fixture(),auth=f.adapter();assert.deepEqual(await auth.auth('signup',{email,password:'a-long-private-password'}),{session:null,requiresConfirmation:true,confirmationMethod:'code'});assert.equal(f.calls[0].name,'SignUpCommand');assert.equal(f.sessions.size,0);assert.equal(f.users.size,0);
+  const existing=fixture({send:async()=>{throw providerError('UsernameExistsException');}});assert.deepEqual(await existing.adapter().auth('signup',{email,password:'a-long-private-password'}),{session:null,requiresConfirmation:true,confirmationMethod:'code'});
+});
+test('signup email code confirmation uses ConfirmSignUp without creating a session or claiming a different alias',async()=>{
+  const f=fixture();assert.deepEqual(await f.adapter().auth('verify',{email:' '+email.toUpperCase()+' ',code:'012345'}),{ok:true});
+  assert.equal(f.calls[0].name,'ConfirmSignUpCommand');assert.deepEqual(f.calls[0].input,{ClientId:'client123',Username:email,ConfirmationCode:'012345',ForceAliasCreation:false});assert.equal(f.sessions.size,0);assert.equal(f.users.size,0);
+});
+test('signup confirmation rejects malformed, wrong and expired codes without leaking provider details',async()=>{
+  const invalid=fixture();for(const code of ['12345','1234567','abcdef',123456])await assert.rejects(()=>invalid.adapter().auth('verify',{email,code}),error=>error.status===400&&error.code==='INVALID_CODE');assert.equal(invalid.calls.length,0);
+  for(const name of ['CodeMismatchException','ExpiredCodeException']){const f=fixture({send:async()=>{throw providerError(name);}});await assert.rejects(()=>f.adapter().auth('verify',{email,code:'012345'}),error=>error.status===400&&error.code==='INVALID_CODE'&&!/private|password=|recovery/.test(error.message));}
+});
+test('signup code resend has one safe response for pending, missing and already-confirmed users',async()=>{
+  const responses=[];
+  for(const name of [null,'UserNotFoundException','InvalidParameterException','NotAuthorizedException']){
+    const f=fixture({send:async()=>{if(name)throw providerError(name);return{CodeDeliveryDetails:{Destination:'private@example.test'}};}});
+    responses.push(await f.adapter().auth('resend',{email}));assert.equal(f.calls[0].name,'ResendConfirmationCodeCommand');assert.deepEqual(f.calls[0].input,{ClientId:'client123',Username:email});assert.equal(f.sessions.size,0);assert.equal(f.users.size,0);
+  }
+  assert.ok(responses.every(value=>JSON.stringify(value)===JSON.stringify(responses[0])));assert.doesNotMatch(JSON.stringify(responses),/private|Destination|cognito-fixture/);
 });
 test('recovery uses Cognito code delivery without revealing whether the account exists',async()=>{
   for(const missing of [false,true]){const f=fixture({send:async(command,next)=>{if(missing)throw providerError('UserNotFoundException');return next(command);}});const result=await f.adapter().auth('recover',{email});assert.equal(result.requiresCode,true);assert.doesNotMatch(JSON.stringify(result),new RegExp(email));assert.equal(f.calls[0].name,'ForgotPasswordCommand');assert.equal(f.calls[0].input.Username,email);}
