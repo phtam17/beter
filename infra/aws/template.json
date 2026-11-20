@@ -80,7 +80,7 @@
       "Type": "String",
       "Default": "https://pending.invalid",
       "AllowedPattern": "https://[A-Za-z0-9.-]+(?::[0-9]+)?",
-      "Description": "Update to the CloudFront HTTPS origin after first closed-stack creation, or supply the custom HTTPS origin."
+      "Description": "Update to PublicGatewayOrigin after closed-stack creation when FreeGatewayHosting=true, otherwise to the custom HTTPS/CloudFront origin."
     },
     "RuntimeSecretArn": {
       "Type": "String",
@@ -162,7 +162,16 @@
         "false",
         "true"
       ],
-      "Description": "Enable only after verifying the regional Lambda concurrent-executions quota is at least 105 (five reserved plus 100 unreserved). Closed staging supports low-quota new accounts without reservations."
+      "Description": "Enable only after verifying the regional Lambda concurrent-executions quota is at least 106 (six reserved plus 100 unreserved). Closed staging supports low-quota accounts without reservations."
+    },
+    "FreeGatewayHosting": {
+      "Type": "String",
+      "Default": "true",
+      "AllowedValues": [
+        "true",
+        "false"
+      ],
+      "Description": "Use the AWS-generated HTTP API HTTPS hostname with TLS 1.2 minimum, no purchased domain required. The optional CloudFront distribution is disabled in this mode."
     }
   },
   "Rules": {
@@ -331,13 +340,25 @@
         },
         {
           "Assert": {
-            "Fn::Not": [
+            "Fn::Or": [
               {
                 "Fn::Equals": [
                   {
-                    "Ref": "CustomDomainName"
+                    "Ref": "FreeGatewayHosting"
                   },
-                  ""
+                  "true"
+                ]
+              },
+              {
+                "Fn::Not": [
+                  {
+                    "Fn::Equals": [
+                      {
+                        "Ref": "CustomDomainName"
+                      },
+                      ""
+                    ]
+                  }
                 ]
               }
             ]
@@ -346,13 +367,25 @@
         },
         {
           "Assert": {
-            "Fn::Not": [
+            "Fn::Or": [
               {
                 "Fn::Equals": [
                   {
-                    "Ref": "AcmCertificateArn"
+                    "Ref": "FreeGatewayHosting"
                   },
-                  ""
+                  "true"
+                ]
+              },
+              {
+                "Fn::Not": [
+                  {
+                    "Fn::Equals": [
+                      {
+                        "Ref": "AcmCertificateArn"
+                      },
+                      ""
+                    ]
+                  }
                 ]
               }
             ]
@@ -431,6 +464,14 @@
       "Fn::Equals": [
         {
           "Ref": "EnableReservedConcurrency"
+        },
+        "true"
+      ]
+    },
+    "IsFreeGateway": {
+      "Fn::Equals": [
+        {
+          "Ref": "FreeGatewayHosting"
         },
         "true"
       ]
@@ -1449,6 +1490,19 @@
             },
             "BETER_FUNDING_CUTOFF_AT": {
               "Ref": "CreditCutoffAt"
+            },
+            "BETER_PUBLIC_GATEWAY": {
+              "Fn::If": [
+                "IsFreeGateway",
+                "true",
+                "false"
+              ]
+            },
+            "BETER_STAGING_AUTH_HASH": {
+              "Ref": "StagingAuthorizationHash"
+            },
+            "BETER_LAUNCH_OPEN": {
+              "Ref": "LaunchOpen"
             }
           }
         },
@@ -1789,7 +1843,13 @@
         "ApiId": {
           "Ref": "HttpApi"
         },
-        "RouteKey": "$default",
+        "RouteKey": {
+          "Fn::If": [
+            "IsFreeGateway",
+            "ANY /api",
+            "$default"
+          ]
+        },
         "Target": {
           "Fn::Join": [
             "",
@@ -2222,7 +2282,13 @@
       "Type": "AWS::CloudFront::Distribution",
       "Properties": {
         "DistributionConfig": {
-          "Enabled": true,
+          "Enabled": {
+            "Fn::If": [
+              "IsFreeGateway",
+              false,
+              true
+            ]
+          },
           "Comment": {
             "Fn::Sub": "Beter ${Environment}; access closed until approved."
           },
@@ -2469,6 +2535,315 @@
           ]
         }
       }
+    },
+    "StaticLogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": {
+          "Fn::Sub": "${AppName}-${Environment}-static"
+        },
+        "RetentionInDays": {
+          "Fn::If": [
+            "IsProduction",
+            30,
+            7
+          ]
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      },
+      "Condition": "IsFreeGateway"
+    },
+    "StaticRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "StaticLogsOnly",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "StaticLogGroup",
+                      "Arn"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      },
+      "Condition": "IsFreeGateway"
+    },
+    "StaticFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Condition": "IsFreeGateway",
+      "Properties": {
+        "FunctionName": {
+          "Fn::Sub": "${AppName}-${Environment}-static"
+        },
+        "Runtime": "nodejs24.x",
+        "Architectures": [
+          "arm64"
+        ],
+        "Handler": "index.assetsHandler",
+        "Code": {
+          "S3Bucket": {
+            "Ref": "CodeS3Bucket"
+          },
+          "S3Key": {
+            "Ref": "CodeS3Key"
+          },
+          "S3ObjectVersion": {
+            "Fn::If": [
+              "HasCodeVersion",
+              {
+                "Ref": "CodeS3ObjectVersion"
+              },
+              {
+                "Ref": "AWS::NoValue"
+              }
+            ]
+          }
+        },
+        "Role": {
+          "Fn::GetAtt": [
+            "StaticRole",
+            "Arn"
+          ]
+        },
+        "Timeout": 5,
+        "MemorySize": 128,
+        "ReservedConcurrentExecutions": {
+          "Fn::If": [
+            "UseReservedConcurrency",
+            1,
+            {
+              "Ref": "AWS::NoValue"
+            }
+          ]
+        },
+        "Environment": {
+          "Variables": {
+            "NODE_ENV": "production",
+            "BETER_ENVIRONMENT": {
+              "Ref": "Environment"
+            },
+            "BETER_STAGING_AUTH_HASH": {
+              "Ref": "StagingAuthorizationHash"
+            },
+            "BETER_LAUNCH_OPEN": {
+              "Ref": "LaunchOpen"
+            },
+            "BETER_FUNDING_CUTOFF_AT": {
+              "Ref": "CreditCutoffAt"
+            }
+          }
+        },
+        "LoggingConfig": {
+          "LogFormat": "JSON",
+          "LogGroup": {
+            "Ref": "StaticLogGroup"
+          }
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "AppName"
+            }
+          },
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      }
+    },
+    "StaticIntegration": {
+      "Type": "AWS::ApiGatewayV2::Integration",
+      "Condition": "IsFreeGateway",
+      "Properties": {
+        "ApiId": {
+          "Ref": "HttpApi"
+        },
+        "IntegrationType": "AWS_PROXY",
+        "IntegrationUri": {
+          "Fn::GetAtt": [
+            "StaticFunction",
+            "Arn"
+          ]
+        },
+        "PayloadFormatVersion": "2.0",
+        "TimeoutInMillis": 5000
+      }
+    },
+    "ApiProxyRoute": {
+      "Type": "AWS::ApiGatewayV2::Route",
+      "Condition": "IsFreeGateway",
+      "Properties": {
+        "ApiId": {
+          "Ref": "HttpApi"
+        },
+        "RouteKey": "ANY /api/{proxy+}",
+        "Target": {
+          "Fn::Join": [
+            "",
+            [
+              "integrations/",
+              {
+                "Ref": "ApiIntegration"
+              }
+            ]
+          ]
+        }
+      }
+    },
+    "StaticRootGetRoute": {
+      "Type": "AWS::ApiGatewayV2::Route",
+      "Condition": "IsFreeGateway",
+      "Properties": {
+        "ApiId": {
+          "Ref": "HttpApi"
+        },
+        "RouteKey": "GET /",
+        "Target": {
+          "Fn::Join": [
+            "",
+            [
+              "integrations/",
+              {
+                "Ref": "StaticIntegration"
+              }
+            ]
+          ]
+        }
+      }
+    },
+    "StaticRootHeadRoute": {
+      "Type": "AWS::ApiGatewayV2::Route",
+      "Condition": "IsFreeGateway",
+      "Properties": {
+        "ApiId": {
+          "Ref": "HttpApi"
+        },
+        "RouteKey": "HEAD /",
+        "Target": {
+          "Fn::Join": [
+            "",
+            [
+              "integrations/",
+              {
+                "Ref": "StaticIntegration"
+              }
+            ]
+          ]
+        }
+      }
+    },
+    "StaticProxyGetRoute": {
+      "Type": "AWS::ApiGatewayV2::Route",
+      "Condition": "IsFreeGateway",
+      "Properties": {
+        "ApiId": {
+          "Ref": "HttpApi"
+        },
+        "RouteKey": "GET /{proxy+}",
+        "Target": {
+          "Fn::Join": [
+            "",
+            [
+              "integrations/",
+              {
+                "Ref": "StaticIntegration"
+              }
+            ]
+          ]
+        }
+      }
+    },
+    "StaticProxyHeadRoute": {
+      "Type": "AWS::ApiGatewayV2::Route",
+      "Condition": "IsFreeGateway",
+      "Properties": {
+        "ApiId": {
+          "Ref": "HttpApi"
+        },
+        "RouteKey": "HEAD /{proxy+}",
+        "Target": {
+          "Fn::Join": [
+            "",
+            [
+              "integrations/",
+              {
+                "Ref": "StaticIntegration"
+              }
+            ]
+          ]
+        }
+      }
+    },
+    "StaticInvokePermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Ref": "StaticFunction"
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Sub": "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*"
+        }
+      },
+      "Condition": "IsFreeGateway"
     }
   },
   "Outputs": {
@@ -2561,6 +2936,15 @@
       "Value": {
         "Ref": "CreditCutoffAt"
       }
+    },
+    "PublicGatewayOrigin": {
+      "Value": {
+        "Fn::GetAtt": [
+          "HttpApi",
+          "ApiEndpoint"
+        ]
+      },
+      "Description": "Free AWS-generated HTTPS site origin; HTTP APIs enforce TLS 1.2 minimum."
     }
   }
 }
