@@ -36,8 +36,8 @@ test('migration planning is read-only and reports pending files without configur
 test('invalid migration identifiers and SQL are refused before connecting',async()=>{
   assert.equal(typeof implementation.applyAwsMigrations,'function');for(const files of [[{id:'../private',sql:'select 1;'}],[{id:'bad.sql',sql:"select 'unclosed"}],[]]){const {database,calls}=fakeDatabase();await assert.rejects(()=>implementation.applyAwsMigrations({database,migrations:files}),/invalid|empty|unterminated/i);assert.equal(calls.length,0);}
 });
-test('runtime credentials are bound privately after reviewed migrations, with no value in the result',async()=>{
-  assert.equal(typeof implementation.applyAwsMigrations,'function');const {database,calls}=fakeDatabase();const password='private-runtime-password-1234567890';const result=await implementation.applyAwsMigrations({database,migrations,runtimePassword:password});const call=calls.find(item=>item.sql.includes('beter_runtime_configure'));assert.equal(call.parameters.password,password);assert.equal(call.sql.includes(password),false);assert.doesNotMatch(JSON.stringify(result),/private-runtime/);assert.equal(result.runtimeConfigured,true);
+test('runtime credentials reach PostgreSQL only as a salted SCRAM verifier after reviewed migrations',async()=>{
+  assert.equal(typeof implementation.applyAwsMigrations,'function');const {database,calls}=fakeDatabase();const password='private-runtime-password-1234567890';const result=await implementation.applyAwsMigrations({database,migrations,runtimePassword:password});const call=calls.find(item=>item.sql.includes('beter_runtime_configure'));assert.match(call.parameters.verifier,/^SCRAM-SHA-256\$4096:[A-Za-z0-9+/]{22}==\$[A-Za-z0-9+/]{43}=:[A-Za-z0-9+/]{43}=$/);assert.doesNotMatch(JSON.stringify(calls),/private-runtime-password/);assert.doesNotMatch(JSON.stringify(result),/private-runtime/);assert.equal(result.runtimeConfigured,true);
 });
 test('the complete AWS migration chain executes through Data API compatible PostgreSQL calls and retries cleanly',async()=>{
   assert.equal(typeof implementation.loadAwsMigrations,'function');const pg=new PGlite();const unsupported=[];
@@ -53,7 +53,11 @@ test('the complete AWS migration chain executes through Data API compatible Post
 test('migration CLI retrieves runtime credentials privately and never prints a secret value',async()=>{
   assert.equal(typeof implementation.runAwsMigrationCli,'function');const {database,calls}=fakeDatabase();const output=[],password='runtime-private-password-1234567890';let secretReads=0;
   const result=await implementation.runAwsMigrationCli(['--apply'],{database,env:{BETER_DATABASE_RUNTIME_SECRET_ARN:'arn:aws:secretsmanager:us-west-2:123456789012:secret:runtime'},loadMigrations:async()=>migrations,secretsClient:{send:async command=>{secretReads++;assert.equal(command.input.SecretId,'arn:aws:secretsmanager:us-west-2:123456789012:secret:runtime');return{SecretString:JSON.stringify({username:'beter_runtime',password})};}},writeOutput:text=>output.push(JSON.parse(text))});
-  assert.equal(result,0);assert.equal(secretReads,1);assert.equal(output[0].runtimeConfigured,true);assert.equal(calls.find(item=>item.sql.includes('beter_runtime_configure')).parameters.password,password);assert.doesNotMatch(JSON.stringify(output),/runtime-private/);
+  assert.equal(result,0);assert.equal(secretReads,1);assert.equal(output[0].runtimeConfigured,true);assert.match(calls.find(item=>item.sql.includes('beter_runtime_configure')).parameters.verifier,/^SCRAM-SHA-256\$/);assert.doesNotMatch(JSON.stringify(calls),/runtime-private-password/);assert.doesNotMatch(JSON.stringify(output),/runtime-private/);
+});
+test('SCRAM verifier derivation uses independent random salts and refuses unsupported plaintext input',()=>{
+  assert.equal(typeof implementation.createScramVerifier,'function');const one=implementation.createScramVerifier('private-runtime-password-1234567890'),two=implementation.createScramVerifier('private-runtime-password-1234567890');assert.notEqual(one,two);assert.match(one,/^SCRAM-SHA-256\$4096:/);
+  for(const password of ['short','x'.repeat(129),'unicode-密码-password-12345678901234',null])assert.throws(()=>implementation.createScramVerifier(password),/credential/i);
 });
 test('migration CLI rejects unsafe input, redacts failures, and leaves check mode read-only',async()=>{
   const output=[];const writeOutput=text=>output.push(JSON.parse(text));assert.equal(await implementation.runAwsMigrationCli([],{writeOutput}),2);assert.equal(await implementation.runAwsMigrationCli(['--apply','--password','private'],{writeOutput}),2);

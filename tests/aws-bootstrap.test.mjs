@@ -17,6 +17,16 @@ test('private auth storage is inaccessible to anonymous and authenticated databa
   const db=await database();try{for(const role of ['anon','authenticated']){await db.exec('set role '+role);await assert.rejects(()=>db.query('select * from auth.aws_sessions'),/permission/i);await assert.rejects(()=>call(db,'beter_session_get',['a'.repeat(64),'access'],['text','text']),/permission/i);await db.exec('reset role');}}
   finally{await db.close();}
 });
+test('runtime login setup accepts only a SCRAM verifier and remains administrator only',async()=>{
+  const db=await database();const verifier='SCRAM-SHA-256$4096:'+Buffer.alloc(16,3).toString('base64')+'$'+Buffer.alloc(32,4).toString('base64')+':'+Buffer.alloc(32,5).toString('base64');
+  try{
+    await assert.rejects(()=>call(db,'beter_runtime_configure',['private-runtime-password-1234567890'],['text']),/invalid runtime database credential/i);
+    assert.equal(await call(db,'beter_runtime_configure',[verifier],['text']),true);
+    assert.equal((await db.query("select rolpassword from pg_authid where rolname='beter_runtime'")).rows[0].rolpassword,verifier);
+    for(const value of [verifier.replace('$4096:','$1:'),verifier+';drop role anon',null])await assert.rejects(()=>call(db,'beter_runtime_configure',[value],['text']),/invalid runtime database credential/i);
+    for(const role of ['anon','authenticated','service_role','beter_runtime']){await db.exec('set role '+role);await assert.rejects(()=>call(db,'beter_runtime_configure',[verifier],['text']),/permission/i);await db.exec('reset role');}
+  }finally{await db.close();}
+});
 test('service auth store reads encrypted payloads with user metadata and rotates refresh tokens exactly once',async()=>{
   const db=await database();try{await db.exec('set role service_role');await call(db,'beter_user_upsert',[user,'account@example.test'],['uuid','text']);const first=session();await call(db,'beter_session_put',[JSON.stringify(first)],['jsonb']);const found=await call(db,'beter_session_get',[first.accessHash,'access'],['text','text']);assert.equal(found.sealedTokens,first.sealedTokens);assert.equal(found.user.id,user);assert.equal(found.user.email,'account@example.test');
     const next={...session('c'),previousAccessHash:first.accessHash,previousRefreshHash:first.refreshHash};assert.equal(await call(db,'beter_session_rotate',[first.refreshHash,JSON.stringify(next)],['text','jsonb']),true);assert.equal(await call(db,'beter_session_rotate',[first.refreshHash,JSON.stringify(session('e'))],['text','jsonb']),false);assert.equal(await call(db,'beter_session_get',[first.accessHash,'access'],['text','text']),null);const refreshed=await call(db,'beter_session_get',[next.refreshHash,'refresh'],['text','text']);assert.equal(refreshed.accessHash,next.accessHash);assert.equal(refreshed.previousRefreshHash,first.refreshHash);assert.ok(Number.isSafeInteger(refreshed.createdAt));
