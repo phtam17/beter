@@ -110,7 +110,8 @@ test('critical local stylesheets are discoverable directly in cascade order', as
   const links = await page.locator('head link[rel="stylesheet"]').evaluateAll(elements => elements
     .filter(element => new URL(element.href).origin === location.origin)
     .map(element => new URL(element.href).pathname));
-  expect(links).toEqual(['/tokens.css', '/base.css', '/styles.css']);
+  expect(links).toContain('/fonts.css');
+  expect(links.filter(path => ['/tokens.css', '/base.css', '/styles.css'].includes(path))).toEqual(['/tokens.css', '/base.css', '/styles.css']);
   const stylesheet = await request.get('/styles.css');
   expect(stylesheet.ok()).toBe(true);
   expect(await stylesheet.text()).not.toMatch(/@import\b/);
