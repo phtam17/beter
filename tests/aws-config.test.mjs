@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readSettings} from '../server/config.ts';
 
-export const awsEnvironment={NODE_ENV:'production',BETER_BACKEND:'aws',BETER_ENVIRONMENT:'staging',BETER_DATA_MODE:'sample',AWS_REGION:'us-west-2',SITE_URL:'https://staging.example.com',BETER_DATABASE_RESOURCE_ARN:'arn:aws:rds:us-west-2:123456789012:cluster:beter-staging',BETER_DATABASE_SECRET_ARN:'arn:aws:secretsmanager:us-west-2:123456789012:secret:beter-db-abcdef',BETER_DATABASE_NAME:'beter',BETER_COGNITO_CLIENT_ID:'client123',BETER_COGNITO_USER_POOL_ID:'us-west-2_Pool123',BETER_RUNTIME_SECRET_ARN:'arn:aws:secretsmanager:us-west-2:123456789012:secret:beter-runtime-abcdef',BETER_SESSION_SECRET:'s'.repeat(48),JOB_SECRET:'j'.repeat(48),BETER_ORIGIN_SECRET:'o'.repeat(48)};
+export const awsEnvironment={NODE_ENV:'production',BETER_BACKEND:'aws',BETER_ENVIRONMENT:'staging',BETER_DATA_MODE:'sample',BETER_SAMPLE_START_AT:'2026-11-20T20:00:00.000Z',AWS_REGION:'us-west-2',SITE_URL:'https://staging.example.com',BETER_DATABASE_RESOURCE_ARN:'arn:aws:rds:us-west-2:123456789012:cluster:beter-staging',BETER_DATABASE_SECRET_ARN:'arn:aws:secretsmanager:us-west-2:123456789012:secret:beter-db-abcdef',BETER_DATABASE_NAME:'beter',BETER_COGNITO_CLIENT_ID:'client123',BETER_COGNITO_USER_POOL_ID:'us-west-2_Pool123',BETER_RUNTIME_SECRET_ARN:'arn:aws:secretsmanager:us-west-2:123456789012:secret:beter-runtime-abcdef',BETER_SESSION_SECRET:'s'.repeat(48),JOB_SECRET:'j'.repeat(48),BETER_ORIGIN_SECRET:'o'.repeat(48)};
 test('AWS settings select managed services without Supabase and keep explicit staging sample mode',()=>{
   const settings=readSettings(awsEnvironment);assert.equal(settings.mode,'aws');assert.equal(settings.trustProxy,'aws');assert.equal(settings.dataMode,'sample');assert.equal(settings.supabaseConfigured,false);assert.equal(settings.awsRegion,'us-west-2');assert.equal(settings.databaseResourceArn,awsEnvironment.BETER_DATABASE_RESOURCE_ARN);assert.equal(settings.databaseSecretArn,awsEnvironment.BETER_DATABASE_SECRET_ARN);assert.equal(settings.databaseName,'beter');assert.equal(settings.cognitoClientId,'client123');assert.equal(settings.cognitoUserPoolId,'us-west-2_Pool123');assert.equal(settings.originSecret,awsEnvironment.BETER_ORIGIN_SECRET);
 });
@@ -17,9 +17,9 @@ test('AWS settings reject remote transport, cross-region resources, invalid iden
 });
 test('AWS sample deployment requires staging explicitly and live deployment requires its provider key',()=>{
   for(const environment of [undefined,'development','production'])assert.throws(()=>readSettings({...awsEnvironment,BETER_ENVIRONMENT:environment}),/staging/i);
-  assert.throws(()=>readSettings({...awsEnvironment,BETER_DATA_MODE:'live'}),/provider key/i);
-  assert.equal(readSettings({...awsEnvironment,BETER_ENVIRONMENT:'production',BETER_DATA_MODE:'live',ODDS_API_KEY:'private-provider-key'}).dataMode,'live');
+  assert.throws(()=>readSettings({...awsEnvironment,BETER_DATA_MODE:'live',BETER_SAMPLE_START_AT:undefined}),/provider key/i);
+  assert.equal(readSettings({...awsEnvironment,BETER_ENVIRONMENT:'production',BETER_DATA_MODE:'live',BETER_SAMPLE_START_AT:undefined,ODDS_API_KEY:'private-provider-key'}).dataMode,'live');
 });
 test('AWS always applies hosted production guards when NODE_ENV is absent or development',()=>{
-  for(const NODE_ENV of [undefined,'development']){const settings=readSettings({...awsEnvironment,NODE_ENV,BETER_ENVIRONMENT:undefined,BETER_DATA_MODE:'live',ODDS_API_KEY:'live-private-provider-key'});assert.equal(settings.production,true);assert.equal(settings.environment,'production');}
+  for(const NODE_ENV of [undefined,'development']){const settings=readSettings({...awsEnvironment,NODE_ENV,BETER_ENVIRONMENT:undefined,BETER_DATA_MODE:'live',BETER_SAMPLE_START_AT:undefined,ODDS_API_KEY:'live-private-provider-key'});assert.equal(settings.production,true);assert.equal(settings.environment,'production');}
 });
