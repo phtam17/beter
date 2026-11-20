@@ -4,6 +4,7 @@ import {resolve,basename} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {splitSql} from '../server/sql.ts';
 import {createDataApiDatabase,createPostgresDatabase} from '../server/aws-database.ts';
+import {SecretsManagerClient,GetSecretValueCommand} from '@aws-sdk/client-secrets-manager';
 export {splitSql};
 
 function migrationError(code,id){const error=new Error(code==='MIGRATION_DRIFT'?'Applied migration checksum differs from the reviewed source.':'Database migration failed; inspect the private deployment record.');error.code=code;if(id)error.migrationId=id;return error;}
@@ -34,7 +35,7 @@ export async function applyAwsMigrations({database,migrations,dryRun=false,runti
     for(const file of prepared){
       try{
         const changed=await database.transaction(async query=>{
-          await query.query("select pg_advisory_xact_lock(hashtextextended('beter-aws-migrations',0))");
+          await query.query("select pg_advisory_xact_lock(hashtextextended('beter-aws-migrations',0))::text as migration_lock");
           const existing=await query.query('select checksum from auth.beter_migrations where id=:id',{id:file.id});
           if(existing.rows.length){if(existing.rows[0].checksum!==file.checksum)throw migrationError('MIGRATION_DRIFT',file.id);return false;}
           for(const sql of file.statements)await query.query(sql);
@@ -47,13 +48,22 @@ export async function applyAwsMigrations({database,migrations,dryRun=false,runti
     return report;
   }catch(error){if(['MIGRATION_DRIFT','MIGRATION_FAILED'].includes(error.code))throw error;throw migrationError('MIGRATION_FAILED');}
 }
-export async function runAwsMigrationCli(args,{env=process.env,writeOutput=text=>process.stdout.write(text+'\n'),database:injectedDatabase,loadMigrations=loadAwsMigrations,readRuntimePassword}={}){
+export async function runAwsMigrationCli(args,{env=process.env,writeOutput=text=>process.stdout.write(text+'\n'),database:injectedDatabase,loadMigrations=loadAwsMigrations,readRuntimePassword,secretsClient}={}){
   if(args.length!==1||!['--check','--apply'].includes(args[0])){writeOutput(JSON.stringify({ok:false,code:'INVALID_ARGUMENTS',message:'Choose --check or --apply. Configure private credentials through the environment.'}));return 2;}
   let database=injectedDatabase;
   try{
     if(!database)database=env.BETER_DATABASE_URL?createPostgresDatabase({connectionString:env.BETER_DATABASE_URL,allowLocalInsecure:env.BETER_DATABASE_ALLOW_LOCAL_INSECURE==='true'}):createDataApiDatabase({resourceArn:env.BETER_DATABASE_RESOURCE_ARN,secretArn:env.BETER_DATABASE_ADMIN_SECRET_ARN,database:env.BETER_DATABASE_NAME||'beter',region:env.AWS_REGION});
     let runtimePassword;
     if(args[0]==='--apply'&&readRuntimePassword)runtimePassword=await readRuntimePassword();
+    else if(args[0]==='--apply'&&env.BETER_DATABASE_RUNTIME_SECRET_ARN){
+      const client=secretsClient||new SecretsManagerClient({region:env.AWS_REGION});
+      try{
+        const response=await client.send(new GetSecretValueCommand({SecretId:env.BETER_DATABASE_RUNTIME_SECRET_ARN}),{abortSignal:AbortSignal.timeout(15000)});
+        const value=JSON.parse(response.SecretString||'');
+        if(value.username!=='beter_runtime'||typeof value.password!=='string'||!/^[A-Za-z0-9_-]{32,128}$/.test(value.password))throw new Error();
+        runtimePassword=value.password;
+      }finally{if(!secretsClient)client.destroy();}
+    }
     const result=await applyAwsMigrations({database,migrations:await loadMigrations(),dryRun:args[0]==='--check',runtimePassword});writeOutput(JSON.stringify({ok:true,mode:args[0].slice(2),...result}));return 0;
   }catch(error){writeOutput(JSON.stringify({ok:false,code:['MIGRATION_DRIFT','MIGRATION_FAILED'].includes(error.code)?error.code:'MIGRATION_SETUP_REQUIRED',...(error.migrationId?{migrationId:error.migrationId}:{}),message:'Migration was not confirmed. Check the reviewed source, private setup, and deployment record.'}));return 1;}
   finally{if(!injectedDatabase)await database?.close?.();}
