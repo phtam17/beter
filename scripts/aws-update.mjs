@@ -5,7 +5,8 @@ import {createHash,randomUUID} from 'node:crypto';
 import {createAwsControl} from './aws-deploy.mjs';
 const projectRoot=resolve(fileURLToPath(new URL('..',import.meta.url)));
 const allowed=new Set(['ScheduleState','SampleStartAt','SampleDurationSeconds','SupportUrl','PrivacyUrl','AccountDeletionUrl']);
-const fail=(code,message)=>{throw Object.assign(new Error(message),{code});};
+class UpdateFault extends Error{constructor(code,message){super(message);this.code=code;}}
+const fail=(code,message)=>{throw new UpdateFault(code,message);};
 const requireValue=(value,code,message)=>{if(!value)fail(code,message);};
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 function canonical(value){return Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;}
@@ -57,11 +58,11 @@ export async function updateDeployment({privateDir=join(projectRoot,'.data/aws-d
     requireValue(stackArn.test(state.stackId||'')&&/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(state.artifactsBucket||'')&&p.CodeS3Bucket===state.artifactsBucket,'UPDATE_STAGING_REQUIRED','The closed staging stack and artifact bucket must match private recovery state.');
     requireValue(now instanceof Date&&Number.isFinite(now.getTime())&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(state.cutoffAt||'')&&p.CreditCutoffAt===state.cutoffAt&&Date.parse(state.cutoffAt+'Z')>now.getTime(),'UPDATE_FUNDING_REQUIRED','Review the funding cutoff before updating staging.');
     requireValue(manifest.schemaVersion===1,'UPDATE_ARTIFACT_INVALID','Use a complete reviewed AWS artifact manifest.');
-    const artifactDir=resolve(dirname(manifestPath)),canonicalDir=await realpath(artifactDir);let templateBytes;
+    const artifactDir=resolve(dirname(manifestPath)),canonicalDir=await realpath(artifactDir);let templateBytes,lambdaBytes;
     for(const [name,file]of [['lambda','lambda.zip'],['template','template.json']]){
       const artifact=manifest[name];requireValue(artifact&&resolve(artifact.path||'')===join(artifactDir,file)&&/^[a-f0-9]{64}$/.test(artifact.sha256||'')&&Number.isSafeInteger(artifact.bytes)&&artifact.bytes>0,'UPDATE_ARTIFACT_INVALID','The artifact manifest contains an unreviewed path or hash.');
       requireValue(await realpath(artifact.path)===join(canonicalDir,file)&&(await lstat(artifact.path)).isFile(),'UPDATE_ARTIFACT_INVALID','Artifact paths must not follow symbolic links.');
-      const bytes=await readFile(artifact.path);requireValue(bytes.length===artifact.bytes&&hash(bytes)===artifact.sha256,'UPDATE_ARTIFACT_INVALID','An artifact hash changed after packaging. Review the package before updating.');if(name==='template')templateBytes=bytes;
+      const bytes=await readFile(artifact.path);requireValue(bytes.length===artifact.bytes&&hash(bytes)===artifact.sha256,'UPDATE_ARTIFACT_INVALID','An artifact hash changed after packaging. Review the package before updating.');if(name==='template')templateBytes=bytes;else lambdaBytes=bytes;
     }
     const template=JSON.parse(templateBytes.toString('utf8')),body=JSON.stringify(template);
     requireValue(template.AWSTemplateFormatVersion==='2010-09-09'&&template.Parameters&&typeof template.Parameters==='object'&&!Array.isArray(template.Parameters)&&template.Resources&&Buffer.byteLength(body)<=51200,'UPDATE_ARTIFACT_INVALID','The reviewed template must fit the direct CloudFormation limit and declare its parameters.');
@@ -78,19 +79,21 @@ export async function updateDeployment({privateDir=join(projectRoot,'.data/aws-d
       requireValue(value.protocol==='https:'&&!value.username&&!value.password&&value.origin===url&&!value.hash,'UPDATE_OVERRIDE_INVALID','Support URL overrides require a same-origin HTTPS URL without credentials.');
     }
     const keys=Object.keys(remote);requireValue(keys.length>0&&keys.every(key=>Object.hasOwn(template.Parameters,key))&&Object.keys(patches).every(key=>Object.hasOwn(template.Parameters,key))&&Object.entries(template.Parameters).every(([key,value])=>Object.hasOwn(remote,key)||Object.hasOwn(patches,key)||Object.hasOwn(value,'Default')),'UPDATE_ARTIFACT_INVALID','The template parameter changes require a separate reviewed migration.');
-    if(sampleChange){requireValue(remote.DataMode!=='live'&&remote.ScheduleState==='DISABLED','UPDATE_QUIESCENCE_REQUIRED','Sample overrides require sample staging with current schedules disabled.');await checkQuiescence({url,state,fetchImpl,timeoutMs});}
+    if(sampleChange){requireValue(remote.DataMode==='sample'&&p.DataMode==='sample'&&remote.ScheduleState==='DISABLED','UPDATE_QUIESCENCE_REQUIRED','Sample overrides require sample staging with current schedules disabled.');await checkQuiescence({url,state,fetchImpl,timeoutMs});}
     const desired={CodeS3Bucket:state.artifactsBucket,CodeS3Key:'lambda/'+manifest.lambda.sha256+'.zip',...patches},changedParameters=Object.keys(desired).filter(key=>remote[key]!==desired[key]);
     const previous=(await control.call('cloudformation','get-template',{StackName:state.stackId,TemplateStage:'Original'},region)).TemplateBody;
     requireValue(previous&&typeof previous==='object'||typeof previous==='string','UPDATE_ARTIFACT_INVALID','Read the current reviewed stack template before updating.');
     const previousTemplate=typeof previous==='string'?JSON.parse(previous):previous;
     if(!changedParameters.length&&JSON.stringify(canonical(previousTemplate))===JSON.stringify(canonical(template)))return{url,status:'UNCHANGED',changedParameters:[]};
-    await control.call('s3api','put-object',{Bucket:state.artifactsBucket,Key:desired.CodeS3Key,ServerSideEncryption:'AES256'},['--body',manifest.lambda.path,...region]);
+    const reviewedPath=join(privateDir,randomUUID()+'.lambda.zip');
+    try{await chmod(privateDir,0o700);await writeFile(reviewedPath,lambdaBytes,{mode:0o600,flag:'wx'});await control.call('s3api','put-object',{Bucket:state.artifactsBucket,Key:desired.CodeS3Key,ServerSideEncryption:'AES256'},['--body',reviewedPath,...region]);}
+    finally{await rm(reviewedPath,{force:true}).catch(()=>{});}
     const requestToken=randomUUID();
     await control.call('cloudformation','update-stack',{StackName:state.stackId,TemplateBody:body,Parameters:[...keys.map(ParameterKey=>Object.hasOwn(desired,ParameterKey)?{ParameterKey,ParameterValue:desired[ParameterKey]}:{ParameterKey,UsePreviousValue:true}),...Object.keys(desired).filter(key=>!keys.includes(key)).map(ParameterKey=>({ParameterKey,ParameterValue:desired[ParameterKey]}))],Capabilities:['CAPABILITY_IAM'],ClientRequestToken:requestToken},region);
     const preserved={...state.parameters};for(const [key,value]of Object.entries(remote))if(value!=='****')preserved[key]=value;
     state.parameters={...preserved,...desired};state.schedules=state.parameters.ScheduleState;state.outputs=outputs;state.lastUpdate={status:'UPDATE_IN_PROGRESS',startedAt:now.toISOString(),clientRequestToken:requestToken,lambdaSha256:manifest.lambda.sha256,templateSha256:manifest.template.sha256,changedParameters};
     await saveState(privateDir,statePath,state);return{url,status:'UPDATE_IN_PROGRESS',changedParameters};
-  }catch(error){if(typeof error?.code==='string'&&error.code.startsWith('UPDATE_'))throw error;fail('UPDATE_FAILED','The staging update was not confirmed. Check the reviewed artifacts and private deployment state.');}
+  }catch(error){if(error instanceof UpdateFault)throw error;fail('UPDATE_FAILED','The staging update was not confirmed. Check the reviewed artifacts and private deployment state.');}
 }
 export async function runUpdateCli(args,{writeOutput=line=>process.stdout.write(line+'\n'),...options}={}){
   const overrides={},seen=new Set();let quiescent=false;
