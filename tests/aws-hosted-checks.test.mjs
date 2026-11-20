@@ -5,13 +5,16 @@ const site='https://fixture.cloudfront.net',api='https://fixture.execute-api.us-
 const state=()=>({launchOpen:false,parameters:{LaunchOpen:'false',DataMode:'sample',TestEmailAllowlist:'owner@example.test'},runtime:{jobSecret:'private-job-fixture-value-1234567890123',sessionSecret:'private-session-fixture-value-123456789',originSecret:'private-origin-fixture-value-123456789',oddsApiKey:''},stagingAccess:'Basic '+Buffer.from('beter:private-staging-fixture-value').toString('base64'),outputs:{CloudFrontDomain:'fixture.cloudfront.net',ApiEndpoint:api}});
 const security={'strict-transport-security':'max-age=31536000','x-content-type-options':'nosniff','x-frame-options':'DENY','referrer-policy':'strict-origin-when-cross-origin','content-security-policy':"default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",'permissions-policy':'camera=(), microphone=(), geolocation=()'};
 const json=(value,status=200,extra={})=>new Response(JSON.stringify(value),{status,headers:{...security,'content-type':'application/json','cache-control':'no-store',...extra}});
-function fixture(override){
+function fixture(override,{gateway=false}={}){
   const calls=[],privateState=state();
+  privateState.parameters.FreeGatewayHosting=gateway?'true':'false';
+  if(gateway)privateState.outputs.PublicGatewayOrigin=api;
   async function normal(url,init){
     const parsed=new URL(url),path=parsed.pathname,headers=new Headers(init.headers);
-    if(parsed.origin===api)return json({error:{code:'FORBIDDEN'}},403);
+    if(parsed.origin===api&&!gateway)return json({error:{code:'FORBIDDEN'}},403);
     if(headers.get('x-beter-staging-access')!==privateState.stagingAccess)return new Response('Closed staging',{status:401,headers:{'cache-control':'no-store'}});
-    if(path==='/')return new Response('<!doctype html><title>Beter</title>',{headers:{...security,'content-type':'text/html','cache-control':'no-cache'}});
+    if(path==='/')return new Response('<!doctype html><title>Beter</title><script type="module" src="./app.js"></script>',{headers:{...security,'content-type':'text/html','cache-control':'no-cache'}});
+    if(path==='/app.js')return new Response('import {start} from "./api-client.js"; start();',{headers:{...security,'content-type':'text/javascript; charset=utf-8','cache-control':'no-cache'}});
     if(path==='/api/config')return json({mode:'aws',dataMode:'sample',liveOddsConfigured:false,supabaseConfigured:false});
     if(path==='/api/health')return json({ok:true,service:'beter-api'});
     if(path==='/api/health/details')return headers.get('authorization')==='Bearer '+privateState.runtime.jobSecret?json({schema_version:4,ledger_mismatches:0,unsettled_bets:0,jobs:[]}):json({error:{code:'FORBIDDEN'}},403);
@@ -29,7 +32,7 @@ function fixture(override){
 test('default hosted checks are read-only, keep credentials at the intended edge routes, and return only safe evidence',async()=>{
   assert.equal(typeof module.checkAwsHosted,'function');const f=fixture(),result=await f.run();
   assert.equal(result.ok,true);assert.equal(result.scope,'closed-staging');assert.equal(result.publicLaunchReady,false);assert.equal(result.authProbes,false);
-  assert.equal(result.checks.length,12);assert.ok(result.checks.every(check=>check.ok));assert.ok(f.calls.every(call=>call.init.method==='GET'));
+  assert.equal(result.checks.length,13);assert.ok(result.checks.every(check=>check.ok));assert.ok(f.calls.every(call=>call.init.method==='GET'));
   assert.ok(f.calls.every(call=>call.init.redirect==='manual'&&call.init.signal instanceof AbortSignal));
   const direct=f.calls.find(call=>call.url.startsWith(api));assert.equal(new Headers(direct.init.headers).get('x-beter-staging-access'),null);assert.equal(new Headers(direct.init.headers).get('authorization'),null);
   for(const call of f.calls){const headers=new Headers(call.init.headers);assert.equal(headers.get('x-beter-origin-secret'),null);if(headers.has('authorization'))assert.equal(call.url,site+'/api/health/details');}
@@ -38,7 +41,7 @@ test('default hosted checks are read-only, keep credentials at the intended edge
 
 test('explicit auth probes use reserved synthetic email, reject safe failures, and never request recovery or confirmed signup',async()=>{
   assert.equal(typeof module.checkAwsHosted,'function');const f=fixture(),result=await f.run({authProbes:true});
-  assert.equal(result.ok,true);assert.equal(result.checks.length,14);
+  assert.equal(result.ok,true);assert.equal(result.checks.length,15);
   const posts=f.calls.filter(call=>call.init.method==='POST');assert.equal(posts.length,2);
   assert.deepEqual(posts.map(call=>new URL(call.url).pathname),['/api/auth/signin','/api/auth/signup']);
   for(const call of posts){const body=JSON.parse(call.init.body);assert.match(body.email,/@example\.invalid$/);assert.notEqual(body.email,'owner@example.test');assert.ok(body.password.length>=10);const headers=new Headers(call.init.headers);assert.equal(headers.get('origin'),site);assert.equal(headers.get('x-beter-client'),'browser');}
@@ -108,4 +111,28 @@ test('provider diagnostics or unexpected session fields cannot pass safe anonymo
   assert.equal(result.checks.find(check=>check.name==='nonexistent-signin').ok,false);
   assert.equal(result.checks.find(check=>check.name==='closed-signup').ok,false);
   assert.ok(!JSON.stringify(result).includes('unsafe-provider-token'));
+});
+
+test('free Gateway checks use the public API origin, expect its access gate, and never contact disabled CloudFront',async()=>{
+  const f=fixture(undefined,{gateway:true});f.state.outputs.CloudFrontDomain='disabled.invalid';
+  const result=await f.run({authProbes:true});assert.equal(result.ok,true);assert.equal(result.topology,'gateway');assert.equal(result.checks.length,15);
+  assert.equal(result.checks.find(check=>check.name==='direct-api-gate').status,401);
+  assert.ok(f.calls.every(call=>new URL(call.url).origin===api));
+  assert.ok(f.calls.every(call=>new Headers(call.init.headers).get('x-beter-origin-secret')===null));
+  assert.equal(new Headers(f.calls.find(call=>call.url.endsWith('/health/details')&&new Headers(call.init.headers).has('authorization')).init.headers).get('authorization'),'Bearer '+f.state.runtime.jobSecret);
+  assert.equal(JSON.parse(f.calls.find(call=>call.url.endsWith('/auth/signin')).init.body).email.endsWith('@example.invalid'),true);
+});
+
+test('free hosting defaults to Gateway and refuses missing or mismatched public endpoint outputs before sending access details',async()=>{
+  const f=fixture(undefined,{gateway:true});delete f.state.parameters.FreeGatewayHosting;assert.equal((await f.run()).ok,true);
+  for(const value of [undefined,'http://fixture.execute-api.us-west-2.amazonaws.com','https://attacker.execute-api.us-west-2.amazonaws.com','https://evil.example']){
+    const bad=fixture(undefined,{gateway:true});bad.state.outputs.PublicGatewayOrigin=value;await assert.rejects(bad.run(),error=>error.message==='Hosted checks require complete closed AWS staging state.');assert.equal(bad.calls.length,0);
+  }
+});
+
+test('a successful HTML response cannot hide a missing or incorrectly typed script asset',async()=>{
+  for(const response of [()=>new Response('<!doctype html><title>Beter</title>',{headers:{'content-type':'text/html'}}),()=>new Response('not found',{status:404}),()=>new Response('export const wrong=true;',{headers:{'content-type':'text/javascript'}})]){
+    const f=fixture(async(url,init,next)=>url.endsWith('/app.js')?response():next(url,init),{gateway:true});
+    const result=await f.run();assert.equal(result.ok,false);assert.equal(result.checks.find(check=>check.name==='static-app-module')?.ok,false);
+  }
 });
