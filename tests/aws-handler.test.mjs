@@ -59,3 +59,12 @@ test('funding cutoff stops API and scheduled work before secret or database load
 test('Cognito registration cannot outlive the funding cutoff even after launch',async()=>{
   const event={request:{userAttributes:{email:'tester@example.test'}}};for(const value of ['2000-01-01T00:00:00','invalid'])await assert.rejects(()=>preSignupHandler(event,{env:{BETER_LAUNCH_OPEN:'true',BETER_FUNDING_CUTOFF_AT:value}}),/not open/i);
 });
+test('heartbeat metrics bypass Lambda console JSON wrapping and remain root-level EMF',async t=>{
+  const records=[];
+  // Lambda JSON logging wraps console output under message; EMF must go straight to stdout.
+  t.mock.method(console,'log',value=>records.push({message:value}));
+  t.mock.method(process.stdout,'write',value=>{records.push(JSON.parse(String(value)));return true;});
+  const handle=createAwsHandler({workerTask:'process',env:{BETER_ENVIRONMENT:'production'},getRuntime:async()=>({runJobs:async()=>({errors:0}),handle:async()=>Response.json({})})});
+  assert.equal((await handle({source:'beter.scheduler',task:'process'})).ok,true);
+  assert.equal(records.length,1);assert.equal(records[0]._aws?.CloudWatchMetrics[0].Namespace,'Beter');assert.deepEqual(records[0]._aws.CloudWatchMetrics[0].Dimensions,[['Environment']]);assert.equal(records[0].Environment,'production');assert.equal(records[0].WorkerSuccess,1);assert.equal(records[0].message,undefined);
+});
