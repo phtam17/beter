@@ -70,3 +70,7 @@ test('free generated hostname bypasses only paid-domain assertions while preserv
  const assertions=template.Rules.PublicLaunchChecks.Assertions;for(const field of ['CustomDomainName','AcmCertificateArn']){const assertion=assertions.find(a=>a.AssertDescription==='Public release requires '+field+'.');assert.ok(assertion.Assert['Fn::Or'],'A free-hostname alternative must exist for '+field);assert.deepEqual(assertion.Assert['Fn::Or'][0],{'Fn::Equals':[{Ref:'FreeGatewayHosting'},'true']});}
  for(const field of ['SesSourceArn','PrivacyUrl','AccountDeletionUrl','SupportUrl','AlertEmail']){const assertion=assertions.find(a=>a.AssertDescription==='Public release requires '+field+'.');assert.equal(assertion.Assert['Fn::Or'],undefined);}
 });
+test('AWS sample timing stays fixed across API worker and monitor cold starts with a bounded settlement window',()=>{
+ assert.equal(template.Parameters.SampleStartAt?.Default,'');assert.equal(template.Parameters.SampleDurationSeconds?.Default,10800);assert.equal(template.Parameters.SampleDurationSeconds?.MinValue,60);assert.equal(template.Parameters.SampleDurationSeconds?.MaxValue,10800);
+ for(const name of ['ApiFunction','WorkerFunction','MonitorFunction']){const env=resource(name).Properties.Environment.Variables;assert.equal(env.BETER_SAMPLE_START_AT?.Ref,'SampleStartAt');assert.equal(env.BETER_SAMPLE_DURATION_SECONDS?.Ref,'SampleDurationSeconds');}
+});
