@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,rm,symlink} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 const execute=promisify(execFile);
 const {packageAws}=await import('../scripts/aws-package.mjs').catch(error=>{if(error.code==='ERR_MODULE_NOT_FOUND')return{};throw error;});
-async function fixture(t){const root=await mkdtemp(join(tmpdir(),'beter-package-'));t.after(()=>rm(root,{recursive:true,force:true}));for(const path of ['aws','dist','infra/aws'])await mkdir(join(root,path),{recursive:true});await writeFile(join(root,'aws/handler.ts'),"export const handler=async()=>({statusCode:200,body:'ok'}); export const preSignupHandler=async(event)=>event;");await writeFile(join(root,'dist/index.html'),'<html>Fixture</html>');await writeFile(join(root,'dist/app.js'),'console.log("fixture")');await writeFile(join(root,'.env.local'),'PRIVATE_KEY=must-never-copy');await writeFile(join(root,'infra/aws/template.json'),JSON.stringify({AWSTemplateFormatVersion:'2010-09-09',Resources:{}}));return root;}
+async function fixture(t){const root=await mkdtemp(join(tmpdir(),'beter-package-'));t.after(()=>rm(root,{recursive:true,force:true}));for(const path of ['aws','dist','infra/aws'])await mkdir(join(root,path),{recursive:true});await writeFile(join(root,'aws/handler.ts'),"export const handler=async()=>({statusCode:200,body:'ok'}); export const preSignupHandler=async(event)=>event;");await writeFile(join(root,'aws/web-handler.ts'),"import {assets} from 'beter:public-assets';export const assetsHandler=async(event)=>assets[event.rawPath]||{missing:true};");await writeFile(join(root,'dist/index.html'),'<html>Fixture</html>');await writeFile(join(root,'dist/app.js'),'console.log("fixture")');await writeFile(join(root,'.env.local'),'PRIVATE_KEY=must-never-copy');await writeFile(join(root,'infra/aws/template.json'),JSON.stringify({AWSTemplateFormatVersion:'2010-09-09',Resources:{}}));return root;}
 test('AWS package builds one deployable Lambda entry, immutable hashes, and only explicit public assets',async t=>{
   assert.equal(typeof packageAws,'function','A reviewed AWS packaging path is required.');const root=await fixture(t);const manifest=await packageAws({root});assert.equal(manifest.schemaVersion,1);assert.equal(manifest.lambda.handler,'index.handler');assert.match(manifest.lambda.sha256,/^[a-f0-9]{64}$/);assert.match(manifest.lambda.sha256Base64,/^[A-Za-z0-9+/]{43}=$/);assert.deepEqual(manifest.assets.map(asset=>asset.key),['app.js','index.html']);assert.ok(manifest.assets.every(asset=>asset.cacheControl==='no-cache'));const listing=(await execute('unzip',['-Z1',manifest.lambda.path])).stdout.trim();assert.equal(listing,'index.mjs');assert.doesNotMatch(await readFile(join(root,'artifacts/aws/lambda/index.mjs'),'utf8'),/must-never-copy/);assert.equal(JSON.parse(await readFile(manifest.template.path,'utf8')).AWSTemplateFormatVersion,'2010-09-09');
 });
@@ -31,4 +32,10 @@ test('artifact generation rejects unsafe destinations, oversized templates, and 
   const root=await fixture(t);await assert.rejects(()=>packageAws({root,outputDir:root}),/dedicated AWS artifact/);
   await writeFile(join(root,'infra/aws/template.json'),JSON.stringify({Description:'x'.repeat(51201)}));await assert.rejects(()=>packageAws({root}),/direct CloudFormation limit/);
   await writeFile(join(root,'infra/aws/template.json'),'{}');await assert.rejects(()=>packageAws({root,buildImpl:async()=>({})}),/local database runtime/);
+});
+
+test('free hostname package exports the static entry and embeds exactly the reviewed public bytes',async t=>{
+ const root=await fixture(t);await writeFile(join(root,'dist/icon.png'),Buffer.from([137,80,78,71,0,255]));await packageAws({root});const entry=await import(pathToFileURL(join(root,'artifacts/aws/lambda/index.mjs')).href);assert.equal(typeof entry.assetsHandler,'function');
+ for(const [path,bytes,type] of [['/index.html',Buffer.from('<html>Fixture</html>'),'text/html; charset=utf-8'],['/icon.png',Buffer.from([137,80,78,71,0,255]),'image/png']]){const asset=await entry.assetsHandler({rawPath:path});assert.equal(asset.isBase64Encoded,true);assert.equal(asset.contentType,type);assert.deepEqual(Buffer.from(asset.body,'base64'),bytes);}
+ assert.deepEqual(await entry.assetsHandler({rawPath:'/.env.local'}),{missing:true});
 });
