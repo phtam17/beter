@@ -24,7 +24,7 @@ type Client={send(command:any,options?:{abortSignal?:AbortSignal}):Promise<any>}
 type Options={region:string;clientId:string;store:AwsAuthStore;secret:string;client?:Client;now?:()=>Date;timeoutMs?:number;refreshTtlMs?:number};
 type ProviderTokens={accessToken:string;refreshToken:string;userId:string};
 const encoder=new TextEncoder();
-const uuid=(value:unknown):value is string=>typeof value==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+const uuid=(value:unknown):value is string=>typeof value==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 const opaque=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 const providerToken=(value:unknown):value is string=>typeof value==='string'&&value.length>0&&value.length<=16384&&/^[A-Za-z0-9_.=+/-]+$/.test(value);
 const hex=(bytes:ArrayBuffer|Uint8Array)=>Array.from(new Uint8Array(bytes),byte=>byte.toString(16).padStart(2,'0')).join('');
