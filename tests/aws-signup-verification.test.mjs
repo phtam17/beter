@@ -13,8 +13,13 @@ function apiFixture(options={}){
   return{calls,limits,post};
 }
 test('anonymous verify and resend normalize email, do not require a password, and use the shared limiter',async()=>{
-  const f=apiFixture();for(const action of ['verify','resend']){const response=await f.post(action,{email:email.toUpperCase(),...(action==='verify'?{code}:{})});assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');}
+  const f=apiFixture();for(const action of ['verify','resend']){const response=await f.post(action,{email:' '+email.toUpperCase()+' ',...(action==='verify'?{code}:{})});assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');}
   assert.deepEqual(f.calls,[{action:'verify',body:{email,code}},{action:'resend',body:{email}}]);assert.deepEqual(f.limits,[{action:'verify',email},{action:'resend',email}]);
+});
+test('real browser-cookie signup transport preserves code confirmation method without issuing a cookie or session',async()=>{
+  const handle=createApiHandler({backend:{authenticate:async()=>{throw Error('must not authenticate');},rpc:async()=>({}),auth:async()=>({session:null,requiresConfirmation:true,confirmationMethod:'code'})},config:{mode:'aws',dataMode:'sample',sessionSecret:'a-private-browser-envelope-key-1234567890'}});
+  const response=await handle(new Request('https://beter.example/api/auth/signup',{method:'POST',headers:{origin:'https://beter.example','x-beter-client':'browser','content-type':'application/json'},body:JSON.stringify({email,password:'a-long-signup-password'})}));
+  assert.equal(response.status,201);assert.equal(response.headers.get('set-cookie'),null);assert.deepEqual(await response.json(),{session:null,requiresConfirmation:true,confirmationMethod:'code'});
 });
 test('verification rejects invalid codes or email before contacting the limiter/provider',async()=>{
   const f=apiFixture();for(const body of [{email,code:'12345'},{email,code:'1234567'},{email,code:123456},{email:'bad',code}])assert.equal((await f.post('verify',body)).status,400);assert.equal(f.calls.length,0);assert.equal(f.limits.length,0);
