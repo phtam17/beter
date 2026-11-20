@@ -37,3 +37,18 @@ The first hosted create-stack attempt exposed an incorrect managed policy ID tha
 The heartbeat fix follows [AWS Node.js logging guidance](https://docs.aws.amazon.com/lambda/latest/dg/nodejs-logging.html): direct EMF output uses stdout so Lambda JSON console wrapping does not prevent metric extraction. Actual CloudWatch metric extraction and alert delivery still require hosted checks.
 
 CloudFormation `validate-template` succeeded against the minimized current template through the deployment operator on November 20, 2026. This validates template syntax/structure, not resource creation permissions, service quotas, dynamic references, or successful service integration. Hosted resource checks remain recorded separately.
+
+
+## Free AWS hostname follow-up
+
+The user chose an AWS-generated public hostname. Official [HTTP API security documentation](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-ciphers.html) establishes TLS 1.2 enforcement for the default endpoint, so the app now supports that hostname without a purchased domain or a weaker CloudFront viewer minimum.
+
+| Step | RED checkpoint | GREEN checkpoint |
+| --- | --- | --- |
+| Isolated static hosting and public launch rules | `33a3e5c`: absent free-hostname resources and assertion alternative failed | `934a07b`: 13 template checks passed; static role has logs permissions only, CloudFront disabled in free mode, API routes preserved |
+| Reviewed static bytes in Lambda | `5c88bdf`: bundled static export missing | `379f674`: 7 package checks passed, including exact binary/HTML bytes loaded through the virtual asset module |
+| Free canonical origin publishing | `b83d3b0`: missing gateway output handling and spoofed-host rejection failed | `87fb43e`: 9 publisher checks passed; the free path avoids unused S3 uploads and CloudFront invalidations |
+
+The focused template/package/publisher run passed 29/29 cases. Package coverage was 94.64% lines/94.74% branches/100% functions; publisher coverage was 96.36% lines/83.33% branches/100% functions. The composed real package imported the static handler and rejected access without deployment configuration. Its then-current ZIP was 389,967 bytes and minimized template 39,284 bytes, with ten reviewed public assets. Regenerate hashes after subsequent changes. API/static handler behavior tests are maintained with their implementation.
+
+Hosted operations/backup-rehearsal tests were checkpointed at `c733452` with valid RED failures before implementation, then paused explicitly to prioritize this hosting change. They do not establish a completed operations or restore check.
