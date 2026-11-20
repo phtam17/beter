@@ -50,9 +50,21 @@ test('provider probe is an explicit export separate from the public API handler'
   const handler=await import('../aws/handler.ts');assert.equal(typeof handler.providerProbeHandler,'function');assert.notEqual(handler.providerProbeHandler,handler.handler);
 });
 test('provider HTTP failures distinguish invalid key, exhausted quota, denied access and rate limits with numeric quota only',async()=>{
-  for(const [status,code]of [[401,'PROVIDER_KEY_INVALID'],[402,'PROVIDER_QUOTA_EXHAUSTED'],[403,'PROVIDER_ACCESS_DENIED'],[429,'PROVIDER_RATE_LIMITED'],[503,'PROVIDER_UNAVAILABLE']]){
+  for(const [status,code]of [[401,'PROVIDER_QUOTA_EXHAUSTED'],[402,'PROVIDER_QUOTA_EXHAUSTED'],[403,'PROVIDER_QUOTA_EXHAUSTED'],[429,'PROVIDER_RATE_LIMITED'],[503,'PROVIDER_UNAVAILABLE']]){
     const f=fixture({fetchImpl:async()=>new Response('private provider response '+apiKey,{status,headers:{'x-requests-remaining':'0','x-requests-used':'500','x-requests-last':'3'}})});
     const result=await f.probe(event);assert.deepEqual(result,{ok:false,code,quota:{remaining:0,used:500,lastCost:3}});assert.doesNotMatch(JSON.stringify(result),/private|https|apiKey|secret/);
+  }
+});
+test('observed zero remaining and positive used credits override401 or403 without reading the provider body',async()=>{
+  for(const status of [401,403]){
+    const f=fixture({fetchImpl:async()=>new Response(apiKey,{status,headers:{'x-requests-remaining':'0','x-requests-used':'500','x-requests-last':'0'}})});
+    assert.deepEqual(await f.probe(event),{ok:false,code:'PROVIDER_QUOTA_EXHAUSTED',quota:{remaining:0,used:500,lastCost:0}});
+  }
+  for(const [status,code]of [[401,'PROVIDER_KEY_INVALID'],[403,'PROVIDER_ACCESS_DENIED']]){
+    for(const quota of [{remaining:'1',used:'499'},{remaining:'0',used:'0'}]){
+      const f=fixture({fetchImpl:async()=>new Response(apiKey,{status,headers:{'x-requests-remaining':quota.remaining,'x-requests-used':quota.used,'x-requests-last':'0'}})});
+      assert.deepEqual(await f.probe(event),{ok:false,code,quota:{remaining:Number(quota.remaining),used:Number(quota.used),lastCost:0}});
+    }
   }
 });
 test('failed requests retain partial numeric quota and discard missing or untrusted values',async()=>{
