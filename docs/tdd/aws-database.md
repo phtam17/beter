@@ -67,6 +67,20 @@ The database interface has `query(sql,namedParameters?)`, `transaction(callback)
 
 Run `node scripts/aws-migrate.mjs --check` for a read-only plan or `--apply` to apply reviewed files. Set private configuration through the process environment. Data API setup uses `BETER_DATABASE_RESOURCE_ARN`, `BETER_DATABASE_ADMIN_SECRET_ARN`, `BETER_DATABASE_NAME`, `BETER_DATABASE_RUNTIME_SECRET_ARN`, and `AWS_REGION`. The runtime secret must identify `beter_runtime`; its password is never printed. Direct migration mode uses `BETER_DATABASE_URL` and optionally `BETER_DATABASE_ALLOW_LOCAL_INSECURE=true` for loopback only. No secrets are accepted as flags.
 
+## Private login setup hardening
+
+Before the first hosted migration, review identified that dynamic `ALTER ROLE PASSWORD` could expose a plaintext password in server error context or DDL logging. The runner now derives a client-side SCRAM-SHA-256 verifier using a fresh 16-byte salt, PBKDF2-HMAC-SHA-256 with 4096 iterations, and the standard Client Key/Stored Key/Server Key derivation. Only the verifier is bound to PostgreSQL; the admin-only setup function rejects plaintext. Password input remains restricted to generated ASCII credentials, for which SASLprep does not change the bytes.
+
+- `222035d`: RED — 20 tests executed,16 passed/4 failed because plaintext was bound, SQL accepted it, and verifier derivation was missing.
+- `13b8197`: GREEN — the same 20 tests passed; salts differ; unsupported credentials are refused; private values are absent from database calls and reports.
+- `tests/aws-scram.integration.mjs`: **1/1 passed** against a fresh PostgreSQL15.14 cluster with real loopback TCP `scram-sha-256` authentication. Correct password authenticated as `beter_runtime`; wrong password failed with28P01; stored `pg_authid` verifier matched. The temporary cluster was stopped and deleted afterward.
+
+The protocol test is opt-in with `TEST_AWS_SCRAM_URL`, requires a fresh local database ending in `_test`, and is outside normal test globbing. It does not contact AWS.
+
+Primary references: [PostgreSQL verifier format](https://www.postgresql.org/docs/17/catalog-pg-authid.html), [SCRAM key derivation](https://www.rfc-editor.org/rfc/rfc5802.html), [SCRAM-SHA-256](https://www.rfc-editor.org/rfc/rfc7677.html).
+
+Post-hardening focused verification: **32 passed,0 failed,0 skipped** using the original database/bootstrap/direct/migration coverage command. Combined coverage: **98.89% lines /87.73% branches /94.83% functions**. `npx tsc --noEmit` passed.
+
 `aws/sql/finalize.sql` wraps normal maintenance with bounded removal of expired private sessions and historical access-hash lineage. It preserves active refresh families and the short replay grace. Bootstrap and financial migrations are immutable after application; subsequent changes need a new reviewed migration.
 
 ## Sources and limits
