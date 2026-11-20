@@ -4,8 +4,8 @@ import {createOddsProvider} from '../server/provider.ts';
 type Client={send(command:GetSecretValueCommand,options:{abortSignal:AbortSignal}):Promise<any>};
 type Options={env:Record<string,string|undefined>;secretClient?:Client;fetchImpl?:(url:string|URL,init?:RequestInit)=>Promise<Response>;now?:()=>Date;timeoutMs?:number};
 type Quota={remaining:number;used:number;lastCost:number};
-type Code='FORBIDDEN'|'FUNDING_REVIEW_REQUIRED'|'PROBE_UNCONFIGURED'|'SECRET_INVALID'|'SECRET_UNAVAILABLE'|'NO_FUTURE_MONEYLINES'|'PROVIDER_INVALID_DATA'|'PROVIDER_RATE_LIMITED'|'PROVIDER_UNAVAILABLE'|'QUOTA_INVALID'|'PROBE_TIMEOUT';
-const fail=(code:Code)=>({ok:false as const,code});
+type Code='FORBIDDEN'|'FUNDING_REVIEW_REQUIRED'|'PROBE_UNCONFIGURED'|'SECRET_INVALID'|'SECRET_UNAVAILABLE'|'NO_FUTURE_MONEYLINES'|'PROVIDER_INVALID_DATA'|'PROVIDER_KEY_INVALID'|'PROVIDER_QUOTA_EXHAUSTED'|'PROVIDER_ACCESS_DENIED'|'PROVIDER_RATE_LIMITED'|'PROVIDER_UNAVAILABLE'|'QUOTA_INVALID'|'PROBE_TIMEOUT';
+const fail=(code:Code,quota?:Partial<Quota>)=>({ok:false as const,code,...(quota?{quota}:{})});
 function quotaValue(value:string|null):number|null{
   if(value===null||!/^\d+$/.test(value))return null;
   const number=Number(value);return Number.isSafeInteger(number)?number:null;
@@ -25,7 +25,8 @@ export function createProviderProbe({env,secretClient,fetchImpl=fetch,now=()=>ne
     if(typeof arn!=='string'||!/^arn:aws(?:-us-gov|-cn)?:secretsmanager:[a-z0-9-]+:\d{12}:secret:[A-Za-z0-9/_+=.@-]+$/.test(arn)||!Number.isFinite(timeoutMs)||timeoutMs<1||timeoutMs>15000)return fail('PROBE_UNCONFIGURED');
     const controller=new AbortController(),deadlineAt=Date.now()+timeoutMs;
     let ownedClient:SecretsManagerClient|undefined,timer:ReturnType<typeof setTimeout>|undefined;
-    const deadline=new Promise<ReturnType<typeof fail>>(resolve=>{timer=setTimeout(()=>{controller.abort();resolve(fail('PROBE_TIMEOUT'));},timeoutMs);});
+    const captured:{status?:number;quota?:Partial<Quota>}={};
+    const deadline=new Promise<ReturnType<typeof fail>>(resolve=>{timer=setTimeout(()=>{controller.abort();resolve(fail('PROBE_TIMEOUT',captured.quota));},timeoutMs);});
     const run=(async()=>{
       let stage:'secret'|'provider'='secret';
       try{
@@ -36,25 +37,29 @@ export function createProviderProbe({env,secretClient,fetchImpl=fetch,now=()=>ne
         const key=payload as {apiKey?:unknown}|null;
         if(!key||Array.isArray(key)||Object.keys(key).length!==1||typeof key.apiKey!=='string'||!key.apiKey.length||key.apiKey.length>256||/[^\x21-\x7e]/.test(key.apiKey))return fail('SECRET_INVALID');
         if(controller.signal.aborted)return fail('PROBE_TIMEOUT');
-        stage='provider';let quota:Quota|null=null;
+        stage='provider';
         const provider=createOddsProvider({apiKey:key.apiKey,bookmaker:'draftkings',now:()=>clock,timeoutMs:Math.max(1,deadlineAt-Date.now()),fetchImpl:async(url,init)=>{
           const signal=init?.signal?AbortSignal.any([init.signal,controller.signal]):controller.signal;
           const response=await fetchImpl(url,{...init,signal,redirect:'error'});
+          if(Number.isInteger(response.status)&&response.status>=100&&response.status<=599)captured.status=response.status;
           const remaining=quotaValue(response.headers.get('x-requests-remaining')),used=quotaValue(response.headers.get('x-requests-used')),lastCost=quotaValue(response.headers.get('x-requests-last'));
-          if(remaining!==null&&used!==null&&lastCost!==null)quota={remaining,used,lastCost};
+          const quota={...(remaining!==null?{remaining}:{}),...(used!==null?{used}:{}),...(lastCost!==null?{lastCost}:{})};
+          captured.quota=Object.keys(quota).length?quota:undefined;
           return response;
         }});
         const events=await provider.getEvents('basketball_nba');
         const eligible=events.filter(item=>item.status==='upcoming'&&Date.parse(item.starts_at)>time&&item.selections.some(selection=>selection.market==='Moneyline'));
         const moneylineSelections=eligible.reduce((count,item)=>count+item.selections.filter(selection=>selection.market==='Moneyline').length,0);
-        if(!eligible.length||!moneylineSelections)return fail('NO_FUTURE_MONEYLINES');
-        if(!quota)return fail('QUOTA_INVALID');
-        return{ok:true as const,eventCount:eligible.length,moneylineSelections,quota,sample:false as const};
+        if(!eligible.length||!moneylineSelections)return fail('NO_FUTURE_MONEYLINES',captured.quota);
+        const quota=captured.quota;
+        if(quota?.remaining===undefined||quota.used===undefined||quota.lastCost===undefined)return fail('QUOTA_INVALID',quota);
+        return{ok:true as const,eventCount:eligible.length,moneylineSelections,quota:{remaining:quota.remaining,used:quota.used,lastCost:quota.lastCost},sample:false as const};
       }catch(error){
-        if(controller.signal.aborted)return fail('PROBE_TIMEOUT');
+        if(controller.signal.aborted)return fail('PROBE_TIMEOUT',captured.quota);
         if(stage==='secret')return fail('SECRET_UNAVAILABLE');
         const code=(error as {code?:unknown})?.code;
-        return fail(code==='provider_timeout'?'PROBE_TIMEOUT':code==='provider_invalid_data'?'PROVIDER_INVALID_DATA':code==='provider_rate_limited'?'PROVIDER_RATE_LIMITED':'PROVIDER_UNAVAILABLE');
+        const status=captured.status;
+        return fail(code==='provider_timeout'?'PROBE_TIMEOUT':status===401?'PROVIDER_KEY_INVALID':status===402?'PROVIDER_QUOTA_EXHAUSTED':status===403?'PROVIDER_ACCESS_DENIED':status===429||code==='provider_rate_limited'?'PROVIDER_RATE_LIMITED':status===200||code==='provider_invalid_data'?'PROVIDER_INVALID_DATA':'PROVIDER_UNAVAILABLE',captured.quota);
       }
     })();
     try{return await Promise.race([run,deadline]);}
