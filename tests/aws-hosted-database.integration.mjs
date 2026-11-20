@@ -19,7 +19,7 @@ export function validateHostedState(state,{expectedAccountId,now=Date.now()}={})
   const resource=o.DatabaseClusterArn?.match(/^arn:(aws|aws-us-gov|aws-cn):rds:([a-z0-9-]+):(\d{12}):cluster:[A-Za-z0-9-]+$/);
   ensure(resource&&resource[2]===region&&resource[3]===account&&o.DatabaseName==='beter','HOSTED_CHECKS_DATABASE_REQUIRED');
   for(const name of ['DatabaseAppSecretArn','DatabaseMasterSecretArn']){
-    const secret=o[name]?.match(/^arn:(aws|aws-us-gov|aws-cn):secretsmanager:([a-z0-9-]+):(\d{12}):secret:[A-Za-z0-9/_+=.@-]+$/);
+    const secret=o[name]?.match(/^arn:(aws|aws-us-gov|aws-cn):secretsmanager:([a-z0-9-]+):(\d{12}):secret:[A-Za-z0-9/_+=.@!-]+$/);
     ensure(secret&&secret[1]===resource[1]&&secret[2]===region&&secret[3]===account,'HOSTED_CHECKS_DATABASE_REQUIRED');
   }
   ensure(o.DatabaseAppSecretArn!==o.DatabaseMasterSecretArn,'HOSTED_CHECKS_SEPARATE_LOGIN_REQUIRED');
