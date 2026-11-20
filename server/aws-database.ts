@@ -11,6 +11,23 @@ type Client={send(command:any,options?:any):Promise<any>};
 type DatabaseOptions={resourceArn:string;secretArn:string;database:string;region?:string;client?:Client;timeoutMs?:number};
 const encoder=new TextEncoder();
 const identifier=/^[a-z][a-z0-9_]*$/;
+type SqlType='text'|'uuid'|'integer'|'bigint'|'boolean'|'jsonb';
+const rpcSignatures:Record<string,Record<string,SqlType>>={
+  beter_portfolio:{},beter_create_portfolio:{p_name:'text'},beter_markets:{},beter_health:{},beter_settlement_candidates:{},
+  beter_quote:{p_selection_ids:'jsonb'},beter_ingest_events:{p_events:'jsonb'},
+  beter_place_bet:{p_quote_id:'uuid',p_stake_cents:'bigint',p_request_id:'text'},
+  beter_settle:{p_event_id:'text',p_outcomes:'jsonb',p_result_version:'text',p_evidence:'jsonb'},
+  beter_job_record:{p_name:'text',p_ok:'boolean',p_detail:'jsonb'},
+  beter_resolve_event:{p_event_id:'text',p_outcomes:'jsonb',p_result_version:'text',p_evidence:'jsonb',p_operator:'text',p_reason:'text'},
+  beter_resume_event:{p_event_id:'text',p_operator:'text',p_reason:'text'},
+  beter_settlement_batch:{p_after:'text',p_limit:'integer'},
+  beter_history:{p_portfolio_id:'uuid',p_before:'uuid',p_limit:'integer',p_status:'text'},
+  beter_maintenance:{p_batch_size:'integer'},beter_auth_limit:{p_buckets:'jsonb'},
+};
+const authSignatures:Record<string,Record<string,SqlType>>={
+  beter_user_upsert:{id:'uuid',email:'text'},beter_session_put:{session:'jsonb'},beter_session_get:{hash:'text',kind:'text'},
+  beter_session_rotate:{hash:'text',session:'jsonb'},beter_session_revoke:{hash:'text'},beter_sessions_revoke_user:{id:'uuid'},beter_sessions_revoke_email:{email:'text'},
+};
 function failure(error:unknown):Error {
   const candidate=error as {name?:string;code?:string;message?:string};
   // Only fixed business reasons cross the SDK boundary. SQL text and credentials never do.
@@ -98,7 +115,7 @@ export function createAwsDatabaseBackend({database,authenticate,auth}:{database:
   return{
     authenticate,auth,
     async rpc(name,args={},token=''){
-      if(!/^beter_[a-z_]+$/.test(name)||!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(key=>!/^p_[a-z_]+$/.test(key)))throw new ApiFault(400,'INVALID_RPC','Invalid database operation or arguments.');
+      if(!Object.hasOwn(rpcSignatures,name)||!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(key=>!Object.hasOwn(rpcSignatures[name],key)))throw new ApiFault(400,'INVALID_RPC','Invalid database operation or arguments.');
       const role=token==='$service'?'service_role':token?'authenticated':'anon';
       const user=role==='authenticated'?await authenticate(token):null;
       if(user&&!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(user.id))throw new ApiFault(401,'AUTH_REQUIRED','Sign in to continue.');
@@ -106,14 +123,14 @@ export function createAwsDatabaseBackend({database,authenticate,auth}:{database:
         await query.query("select set_config('request.jwt.claim.sub',:subject,true) as subject,set_config('request.jwt.claim.role',:role,true) as role,set_config('request.jwt.claims',:claims,true) as claims",{subject:user?.id||'',role,claims:JSON.stringify({sub:user?.id||'',role})});
         await query.query('set local role '+role);
         const parameters=Object.fromEntries(Object.entries(args).map(([key,value])=>[key,value]));
-        return scalar(query,`public.${name}(${Object.keys(args).map(key=>`${key} => :${key}`).join(',')})`,parameters);
+        return scalar(query,`public.${name}(${Object.keys(args).map(key=>`${key} => :${key}::${rpcSignatures[name][key]}`).join(',')})`,parameters);
       });
     },
   };
 }
 export type AuthSession={accessHash:string;refreshHash:string;userId:string;sealedTokens:string;accessExpiresAt:number;refreshExpiresAt:number;previousAccessHash?:string|null;previousRefreshHash?:string|null;createdAt?:number;user?:{id:string;email:string}};
 export function createAwsAuthStore(database:Database){
-  const call=(name:string,parameters:Parameters={})=>service(database,query=>scalar(query,`auth.${name}(${Object.keys(parameters).map(key=>':'+key).join(',')})`,parameters));
+  const call=(name:string,parameters:Parameters={})=>service(database,query=>scalar(query,`auth.${name}(${Object.keys(parameters).map(key=>':'+key+'::'+authSignatures[name][key]).join(',')})`,parameters));
   return{
     upsertUser:({id,email}:{id:string;email:string})=>call('beter_user_upsert',{id,email}),
     createSession:(session:AuthSession)=>call('beter_session_put',{session}),

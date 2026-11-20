@@ -11,6 +11,13 @@ import {createAwsControl} from '../scripts/aws-deploy.mjs';
 
 const ensure=(condition,code)=>{if(!condition)throw new Error(code);};
 const delay=milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds));
+export async function finalizeHostedChecks(originalError,operation,diagnostic=()=>{}){
+  try{await operation();}catch{
+    const code='HOSTED_FIXTURE_FINALIZATION_FAILED_REVIEW_REQUIRED';
+    try{diagnostic(code);}catch{/* Preserve the check's original failure. */}
+    if(!originalError)throw Error(code);
+  }
+}
 export function validateHostedState(state,{expectedAccountId,now=Date.now()}={}){
   const p=state?.parameters,o=state?.outputs,region=state?.region,account=state?.accountId;
   ensure(/^\d{12}$/.test(expectedAccountId||'')&&account===expectedAccountId&&state.stackName==='beter-staging'&&state.launchOpen===false&&state.schedules==='DISABLED','HOSTED_CHECKS_CLOSED_STAGING_REQUIRED');
@@ -90,6 +97,7 @@ async function executeHostedDatabaseChecks(t,{state,config,client,control=create
   const quote=(token,data)=>backend.rpc('beter_quote',{p_selection_ids:[data.selections[0].id]},token);
   const place=(token,accepted,stake,request)=>()=>backend.rpc('beter_place_bet',{p_quote_id:accepted.id,p_stake_cents:stake,p_request_id:request},token);
   const session=label=>({accessHash:createHash('sha256').update(runId+label+'access').digest('hex'),refreshHash:createHash('sha256').update(runId+label+'refresh').digest('hex'),userId:ids[2],sealedTokens:'hosted-check-encrypted-fixture',accessExpiresAt:Date.now()+60000,refreshExpiresAt:Date.now()+3600000});
+  let originalError;
   try{
     await safeStep('hosted runtime login has no ownership, inherited privileges or administrator roles','HOSTED_ROLE_BOUNDARY_FAILED',async()=>{
       const row=(await runtime.query("select current_user::text as name,session_user::text as login,rolsuper,rolinherit,rolcreaterole,rolcreatedb,rolreplication,rolbypassrls,rolcanlogin from pg_roles where rolname=current_user")).rows[0];
@@ -100,7 +108,7 @@ async function executeHostedDatabaseChecks(t,{state,config,client,control=create
       const health=await backend.rpc('beter_health',{},'$service');ensure(health.schema_version>=4,'HOSTED_SCHEMA_VERSION_REQUIRED');
       await runtime.query('select * from auth.aws_sessions limit 1').then(()=>{throw Error('HOSTED_PRIVATE_TABLE_READ_ALLOWED');},()=>{});
     });
-    for(let index=0;index<ids.length;index++)await store.upsertUser({id:ids[index],email:`aws-hosted-${runId}-${index}@example.invalid`});
+    await safeStep('hosted private auth store persists verified fixture identities','HOSTED_FIXTURE_USERS_FAILED',async()=>{for(let index=0;index<ids.length;index++)await store.upsertUser({id:ids[index],email:`aws-hosted-${runId}-${index}@example.invalid`});});
     await safeStep('independent hosted first visits create one portfolio and one grant','HOSTED_INITIAL_GRANT_RACE_FAILED',async()=>{
       const outcomes=await race(ids[0],[()=>backend.rpc('beter_portfolio',{},'fixture-a'),()=>backend.rpc('beter_portfolio',{},'fixture-a')]);
       ensure(outcomes.every(item=>item.status==='fulfilled')&&outcomes[0].value.id===outcomes[1].value.id,'HOSTED_INITIAL_GRANT_RACE_INVALID');const row=await counts(ids[0]);ensure(row.portfolios===1&&row.grants===1,'HOSTED_DUPLICATE_INITIAL_GRANT');await backend.rpc('beter_portfolio',{},'fixture-b');
@@ -134,12 +142,13 @@ async function executeHostedDatabaseChecks(t,{state,config,client,control=create
       await store.createSession(old);const loggedOut=await race('aws-auth:'+ids[2],[()=>store.rotateSession(old.refreshHash,next),()=>store.revokeSessionByAccessHash(old.accessHash)],{ordered:true});ensure(loggedOut[0].status==='fulfilled'&&loggedOut[0].value===true&&loggedOut[1].status==='fulfilled'&&loggedOut[1].value?.accessHash===next.accessHash&&(await store.getSessionByRefreshHash(next.refreshHash))===null,'HOSTED_LOGOUT_RACE_INVALID');
       await store.createSession(old);const recovered=await race('aws-auth:'+ids[2],[()=>store.rotateSession(old.refreshHash,next),()=>store.revokeSessionsByEmail(`aws-hosted-${runId}-2@example.invalid`)],{ordered:true});ensure(recovered.every(item=>item.status==='fulfilled')&&(await store.getSessionByAccessHash(next.accessHash))===null,'HOSTED_RECOVERY_RACE_INVALID');
     });
-  }finally{
-    try{
+  }catch(error){originalError=error;throw error;}
+  finally{
+    await finalizeHostedChecks(originalError,async()=>{
       for(const id of events){const rows=(await admin.query("select id::text as id from public.beter_bets where event_id=:id and status='open' order by id",{id})).rows;if(rows.length)await backend.rpc('beter_settle',{p_event_id:id,p_outcomes:rows.map(row=>({bet_id:row.id,status:'void'})),p_result_version:'hosted-cleanup-'+runId,p_evidence:{source:'hosted-database-check-cleanup'}},'$service');}
       await store.revokeSessionsByUser(ids[2]);
       const health=await backend.rpc('beter_health',{},'$service');ensure(health.ledger_mismatches===0,'HOSTED_LEDGER_RECONCILIATION_FAILED');
-    }catch{throw Error('HOSTED_FIXTURE_FINALIZATION_FAILED_REVIEW_REQUIRED');}
+    },code=>t.diagnostic(code));
   }
 }
 
