@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
+import {PGlite} from '@electric-sql/pglite';
+import {createDataApiDatabase} from '../server/aws-database.ts';
+import {bindPostgresParameters} from '../server/sql.ts';
 const implementation=await import('../scripts/aws-migrate.mjs').catch(error=>{if(error.code==='ERR_MODULE_NOT_FOUND')return{};throw error;});
 function fakeDatabase({failOn}={}){
   const history=new Map(),calls=[];
@@ -35,4 +38,20 @@ test('invalid migration identifiers and SQL are refused before connecting',async
 });
 test('runtime credentials are bound privately after reviewed migrations, with no value in the result',async()=>{
   assert.equal(typeof implementation.applyAwsMigrations,'function');const {database,calls}=fakeDatabase();const password='private-runtime-password-1234567890';const result=await implementation.applyAwsMigrations({database,migrations,runtimePassword:password});const call=calls.find(item=>item.sql.includes('beter_runtime_configure'));assert.equal(call.parameters.password,password);assert.equal(call.sql.includes(password),false);assert.doesNotMatch(JSON.stringify(result),/private-runtime/);assert.equal(result.runtimeConfigured,true);
+});
+test('the complete AWS migration chain executes through Data API compatible PostgreSQL calls and retries cleanly',async()=>{
+  assert.equal(typeof implementation.loadAwsMigrations,'function');const pg=new PGlite();const unsupported=[];
+  const client={send:async command=>{
+    const name=command.constructor.name;if(name==='BeginTransactionCommand'){await pg.exec('begin');return{transactionId:'local-tx'};}if(name==='CommitTransactionCommand'){await pg.exec('commit');return{};}if(name==='RollbackTransactionCommand'){await pg.exec('rollback');return{};}
+    const parameters=Object.fromEntries((command.input.parameters||[]).map(p=>[p.name,p.value.isNull?null:p.typeHint==='JSON'?JSON.parse(p.value.stringValue):p.value.stringValue??p.value.longValue??p.value.doubleValue??p.value.booleanValue]));const bound=bindPostgresParameters(command.input.sql,parameters);const result=await pg.query(bound.sql,bound.values);
+    if(result.fields.some(field=>field.dataTypeID===2278)){unsupported.push('void');throw Object.assign(new Error('Unsupported Data API result type'),{name:'DatabaseErrorException'});}
+    return{formattedRecords:JSON.stringify(result.rows)};
+  }};
+  const database=createDataApiDatabase({client,resourceArn:'arn:aws:rds:us-west-2:123456789012:cluster:test',secretArn:'arn:aws:secretsmanager:us-west-2:123456789012:secret:test',database:'beter'});
+  try{const migrations=await implementation.loadAwsMigrations();const first=await implementation.applyAwsMigrations({database,migrations});assert.equal(first.applied.length,6);assert.deepEqual(unsupported,[]);const second=await implementation.applyAwsMigrations({database,migrations});assert.equal(second.applied.length,0);assert.equal(second.alreadyApplied.length,6);const result=await pg.query('select public.beter_health() as health');assert.equal(result.rows[0].health.schema_version,4);}finally{await pg.close();}
+});
+test('migration CLI retrieves runtime credentials privately and never prints a secret value',async()=>{
+  assert.equal(typeof implementation.runAwsMigrationCli,'function');const {database,calls}=fakeDatabase();const output=[],password='runtime-private-password-1234567890';let secretReads=0;
+  const result=await implementation.runAwsMigrationCli(['--apply'],{database,env:{BETER_DATABASE_RUNTIME_SECRET_ARN:'arn:aws:secretsmanager:us-west-2:123456789012:secret:runtime'},loadMigrations:async()=>migrations,secretsClient:{send:async command=>{secretReads++;assert.equal(command.input.SecretId,'arn:aws:secretsmanager:us-west-2:123456789012:secret:runtime');return{SecretString:JSON.stringify({username:'beter_runtime',password})};}},writeOutput:text=>output.push(JSON.parse(text))});
+  assert.equal(result,0);assert.equal(secretReads,1);assert.equal(output[0].runtimeConfigured,true);assert.equal(calls.find(item=>item.sql.includes('beter_runtime_configure')).parameters.password,password);assert.doesNotMatch(JSON.stringify(output),/runtime-private/);
 });
