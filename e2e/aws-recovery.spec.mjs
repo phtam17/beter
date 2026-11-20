@@ -9,7 +9,7 @@ async function mockRecovery(page,{confirmError=null,confirmStatus=400,delayConfi
     const body=route.request().postData()?route.request().postDataJSON():undefined;
     calls.push({path,body});
     const respond=(value,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(value)}).catch(()=>{});
-    if(path==='/api/config')return respond({mode:'supabase',dataMode:'sample',authProvider:'cognito',liveOddsConfigured:false});
+    if(path==='/api/config')return respond({mode:'aws',dataMode:'sample',authProvider:'cognito',liveOddsConfigured:false});
     if(path==='/api/auth/session')return respond({session:null});
     if(path==='/api/auth/recover'){
       const finish=()=>respond(legacy?{message:'Check your email for a recovery link.'}:{requiresCode:true,message:'If this account exists and is confirmed, check your email for a recovery code.'});
@@ -143,4 +143,19 @@ test('the recovery form remains readable and scrollable with doubled text at 375
   await page.getByLabel('New password',{exact:true}).fill(password);
   await page.getByRole('button',{name:'Update password',exact:true}).click();
   await expect(page.getByRole('dialog',{name:'Sign in to Beter',exact:true})).toContainText('Your password has been updated.');
+});
+
+test('AWS sessions render the saved account and account management without local or vendor assumptions',async({page})=>{
+  await mockRecovery(page);
+  const user={id:'11111111-1111-4111-8111-111111111111',email};
+  const respond=(route,value)=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(value)});
+  await page.route('**/api/auth/session',route=>respond(route,{session:{user,expires_at:Math.floor(Date.now()/1000)+3600}}));
+  await page.route('**/api/portfolio',route=>respond(route,{id:'22222222-2222-4222-8222-222222222222',initial_bankroll_cents:1000000,balance_cents:1000000,bets:[],ledger:[]}));
+  await page.route('**/api/markets',route=>respond(route,{events:[]}));
+  await page.goto('/');
+  await expect(page.getByText('Saved account / Sample feed',{exact:true})).toBeVisible();
+  await expect(page.locator('.stats-row')).toContainText('$10,000.00');
+  await page.getByRole('button',{name:'Manage account',exact:true}).click();
+  await expect(page.getByRole('dialog',{name:'Your Beter account',exact:true})).toContainText('Your practice portfolios are saved to your account.');
+  await expect(page.getByText('This is a local development account.',{exact:false})).toHaveCount(0);
 });
