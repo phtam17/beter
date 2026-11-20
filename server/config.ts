@@ -35,6 +35,7 @@ export function readSettings(env:Record<string,string|undefined>={}) {
     if(!/^[a-z]{2}(?:-[a-z]+){1,3}-\d$/.test(region))throw new Error('AWS configuration requires a valid AWS_REGION.');
     const resource=env.BETER_DATABASE_RESOURCE_ARN?.match(/^arn:(aws|aws-us-gov|aws-cn):rds:([a-z0-9-]+):(\d{12}):cluster:[A-Za-z0-9-]+$/);
     if(!resource||resource[2]!==region)throw new Error('AWS configuration requires a database cluster ARN in AWS_REGION.');
+    if(env.BETER_SUPPORT_TOPIC_ARN){const topic=env.BETER_SUPPORT_TOPIC_ARN.match(/^arn:(aws|aws-us-gov|aws-cn):sns:([a-z0-9-]+):(\d{12}):[A-Za-z0-9_.-]+$/);if(!topic||topic[1]!==resource[1]||topic[2]!==region||topic[3]!==resource[3])throw new Error('AWS support requires an operator notification topic in the application account and region.');}
     for(const key of ['BETER_DATABASE_SECRET_ARN','BETER_RUNTIME_SECRET_ARN']){
       const arn=env[key]?.match(/^arn:(aws|aws-us-gov|aws-cn):secretsmanager:([a-z0-9-]+):(\d{12}):secret:[A-Za-z0-9/_+=.@-]+$/);
       if(!arn||arn[1]!==resource[1]||arn[2]!==region||arn[3]!==resource[3])throw new Error('AWS configuration requires private secret ARNs in the database account and region.');
@@ -61,7 +62,8 @@ export function readSettings(env:Record<string,string|undefined>={}) {
   return {mode,dataMode,production,environment,supabaseConfigured,liveOddsConfigured:Boolean(env.ODDS_API_KEY),sampleStartsAt,sampleDurationMs,
     jobSecret:env.JOB_SECRET||'',sessionSecret:env.BETER_SESSION_SECRET||env.SUPABASE_SERVICE_ROLE_KEY||'',supabaseUrl:env.SUPABASE_URL||'',supabaseAnonKey:env.SUPABASE_ANON_KEY||'',supabaseServiceKey:env.SUPABASE_SERVICE_ROLE_KEY||'',
     oddsApiKey:env.ODDS_API_KEY||'',bookmaker:env.ODDS_BOOKMAKER||'draftkings',siteUrl,
-    supportUrl:safeUrl(env.BETER_SUPPORT_URL,'Support URL'),privacyUrl:safeUrl(env.BETER_PRIVACY_URL,'Privacy URL'),accountDeletionUrl:safeUrl(env.BETER_ACCOUNT_DELETION_URL,'Account deletion URL'),
+    supportTopicArn:env.BETER_SUPPORT_TOPIC_ARN||'',
+    supportUrl:safeUrl(env.BETER_SUPPORT_URL||(aws&&env.BETER_SUPPORT_TOPIC_ARN?siteUrl+'/support.html':''),'Support URL'),privacyUrl:safeUrl(env.BETER_PRIVACY_URL||(aws&&env.BETER_SUPPORT_TOPIC_ARN?siteUrl+'/privacy.html':''),'Privacy URL'),accountDeletionUrl:safeUrl(env.BETER_ACCOUNT_DELETION_URL||(aws&&env.BETER_SUPPORT_TOPIC_ARN?siteUrl+'/account-deletion.html':''),'Account deletion URL'),
     trustProxy:aws?'aws':env.VERCEL==='1'?'vercel':'none',
     awsRegion:env.AWS_REGION||'',databaseResourceArn:env.BETER_DATABASE_RESOURCE_ARN||'',databaseSecretArn:env.BETER_DATABASE_SECRET_ARN||'',databaseName:env.BETER_DATABASE_NAME||'',
     cognitoClientId:env.BETER_COGNITO_CLIENT_ID||'',cognitoUserPoolId:env.BETER_COGNITO_USER_POOL_ID||'',runtimeSecretArn:env.BETER_RUNTIME_SECRET_ARN||'',originSecret:env.BETER_ORIGIN_SECRET||'',

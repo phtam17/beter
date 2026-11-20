@@ -1,4 +1,6 @@
 import {SecretsManagerClient,GetSecretValueCommand} from '@aws-sdk/client-secrets-manager';
+import {SNSClient,PublishCommand} from '@aws-sdk/client-sns';
+import {createAwsSupportHandler} from './aws-support.ts';
 import {RDSDataClient} from '@aws-sdk/client-rds-data';
 import {CognitoIdentityProviderClient} from '@aws-sdk/client-cognito-identity-provider';
 import {createApiHandler,ApiFault} from './api.ts';
@@ -10,11 +12,11 @@ import {runBackgroundJobs} from './jobs.ts';
 import {createAuthLimiter} from './abuse.ts';
 
 type Client={send(command:any,options?:{abortSignal?:AbortSignal}):Promise<any>};
-type Options={env?:Record<string,string|undefined>;secretsClient?:Client;dataApiClient?:Client;cognitoClient?:Client;database?:Database;provider?:OddsProvider;now?:()=>Date;secretTimeoutMs?:number};
+type Options={env?:Record<string,string|undefined>;secretsClient?:Client;dataApiClient?:Client;cognitoClient?:Client;snsClient?:Client;database?:Database;provider?:OddsProvider;now?:()=>Date;secretTimeoutMs?:number};
 const unavailable=()=>new ApiFault(503,'AWS_RUNTIME_UNAVAILABLE','The application services are not available. Check the private AWS configuration.');
 
 /** Only the AWS entry imports this runtime; local development storage is never bundled here. */
-export async function createAwsRuntime({env=process.env,secretsClient,dataApiClient,cognitoClient,database:injectedDatabase,provider:injectedProvider,now,secretTimeoutMs=10000}:Options={}){
+export async function createAwsRuntime({env=process.env,secretsClient,dataApiClient,cognitoClient,snsClient,database:injectedDatabase,provider:injectedProvider,now,secretTimeoutMs=10000}:Options={}){
   const trustedEnv={...env};const ownedClients:{destroy():void}[]=[];
   try{
     if(trustedEnv.BETER_BACKEND!=='aws'||!/^[a-z]{2}(?:-[a-z]+){1,3}-\d$/.test(trustedEnv.AWS_REGION||'')||!/^arn:(aws|aws-us-gov|aws-cn):secretsmanager:[a-z0-9-]+:\d{12}:secret:[A-Za-z0-9/_+=.@-]+$/.test(trustedEnv.BETER_RUNTIME_SECRET_ARN||'')||!Number.isFinite(secretTimeoutMs)||secretTimeoutMs<=0)throw unavailable();
@@ -47,7 +49,16 @@ export async function createAwsRuntime({env=process.env,secretsClient,dataApiCli
       return running;
     };
     const authLimit=createAuthLimiter({backend,secret:settings.sessionSecret,trustProxy:'aws'});
-    const handle=createApiHandler({backend,config:settings,jobSecret:settings.jobSecret,runJobs,allowedOrigins:settings.allowedOrigins,authLimit});
+    const apiHandle=createApiHandler({backend,config:settings,jobSecret:settings.jobSecret,runJobs,allowedOrigins:settings.allowedOrigins,authLimit});
+    let handle=apiHandle;
+    if(settings.supportTopicArn){
+      const notifications=snsClient||new SNSClient({region:settings.awsRegion,maxAttempts:2});if(!snsClient)ownedClients.push(notifications as SNSClient);
+      handle=createAwsSupportHandler({handle:apiHandle,backend,secret:settings.sessionSecret,siteUrl:settings.siteUrl,trustProxy:'aws',sendSupport:async request=>{
+        const controller=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;
+        try{await Promise.race([notifications.send(new PublishCommand({TopicArn:settings.supportTopicArn,Subject:'Beter support request',Message:JSON.stringify(request)}),{abortSignal:controller.signal}),new Promise<never>((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(new Error('Support delivery could not be confirmed.'));},10000);})]);}
+        finally{clearTimeout(timer);}
+      }});
+    }
     return{handle,runJobs,backend,settings,originSecret:settings.originSecret,jobSecret:settings.jobSecret,close:()=>{
       if(!closing)closing=(async()=>{try{await running;}finally{try{await database.close?.();}finally{for(const client of ownedClients)client.destroy();}}})();
       return closing;

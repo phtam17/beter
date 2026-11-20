@@ -1554,6 +1554,9 @@
                   "Ref": "AWS::NoValue"
                 }
               ]
+            },
+            "BETER_SUPPORT_TOPIC_ARN": {
+              "Ref": "NotificationTopic"
             }
           }
         },
@@ -1695,6 +1698,9 @@
                   "Ref": "AWS::NoValue"
                 }
               ]
+            },
+            "BETER_SUPPORT_TOPIC_ARN": {
+              "Ref": "NotificationTopic"
             }
           }
         },
@@ -1854,6 +1860,9 @@
                   "Ref": "AWS::NoValue"
                 }
               ]
+            },
+            "BETER_SUPPORT_TOPIC_ARN": {
+              "Ref": "NotificationTopic"
             }
           }
         },
