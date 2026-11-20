@@ -102,7 +102,7 @@ function createBearerHandler(options: ApiOptions) {
           if(typeof body.password!=='string'||body.password.length<10||body.password.length>200)throw new ApiFault(400,'INVALID_PASSWORD','Use a password with 10 to 200 characters.');
         }
         if(['signup','signin','recover','confirm','verify','resend'].includes(action)){
-          if(typeof body.email!=='string'||body.email.length>254||!/^\S+@\S+\.\S+$/.test(body.email))throw new ApiFault(400,'INVALID_EMAIL','Enter a valid email address.');
+          if(typeof body.email!=='string'||body.email.length>254||!/^\S+@\S+\.\S+$/.test(body.email.trim()))throw new ApiFault(400,'INVALID_EMAIL','Enter a valid email address.');
           body.email=body.email.trim().toLowerCase();
           if(['confirm','verify'].includes(action)&&(typeof body.code!=='string'||!/^\d{6}$/.test(body.code)))throw new ApiFault(400,'INVALID_CODE','Enter the six-digit verification code from your email.');
           if(['signup','signin','confirm'].includes(action)&&(typeof body.password!=='string'||body.password.length<10||body.password.length>200))throw new ApiFault(400,'INVALID_PASSWORD','Use a password with 10 to 200 characters.');

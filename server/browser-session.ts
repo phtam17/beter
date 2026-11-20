@@ -79,11 +79,11 @@ export function createBrowserSessionHandler({handle,backend,secret}:{handle:(req
       let response=await handle(new Request(request,{headers}));
       if(response.status===401&&session&&!authenticating&&!logout&&!recovery){try{session=await refresh(session);setCookie=cookie(await seal(session),LIFETIME);headers.set('Authorization',`Bearer ${session.access_token}`);response=await handle(new Request(retry,{headers}));}catch{setCookie=cookie('',0);}}
       if(authenticating&&response.ok){
-        const payload=await response.json() as {session?:unknown;user?:unknown;requiresConfirmation?:boolean};
+        const payload=await response.json() as {session?:unknown;user?:unknown;requiresConfirmation?:boolean;confirmationMethod?:unknown};
         const next=payload.session?normalize(payload.session,payload.user):null;
         if(payload.session&&!next)return responseJson({error:{code:'INVALID_RESPONSE',message:'The account service returned an invalid session.'}},502);
         if(next)setCookie=cookie(await seal(next),LIFETIME);
-        return finish(responseJson({session:next?publicSession(next):null,...(payload.user?{user:next?.user||payload.user}:{}),...(payload.requiresConfirmation?{requiresConfirmation:true}:{})},response.status));
+        return finish(responseJson({session:next?publicSession(next):null,...(payload.user?{user:next?.user||payload.user}:{}),...(payload.requiresConfirmation?{requiresConfirmation:true}:{}),...(payload.confirmationMethod==='code'?{confirmationMethod:'code'}:{})},response.status));
       }
       if(logout){setCookie=cookie('',0);return finish(responseJson({ok:true}));}
       return finish(response);
