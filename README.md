@@ -13,7 +13,7 @@ npm start
 
 Open `http://127.0.0.1:4173`. **Sign in → Create account** starts a new $10,000 server-held portfolio. Development uses a clearly identified **sample feed** and a persistent local PostgreSQL engine. There are no default credentials. The signed-out demo retains its separate browser-local history and manual simulation controls.
 
-Local development accounts do not send email. Hosted accounts and actual bookmaker odds become available after configuring Supabase, The Odds API, and the deployment environment. The app never substitutes sample prices for an unavailable live provider.
+Local development accounts do not send email. Hosted accounts use AWS Cognito and private Aurora PostgreSQL through the Data API. AWS API Gateway and Lambda serve the app on a free AWS HTTPS hostname. Actual bookmaker odds use The Odds API. The app never substitutes sample prices for an unavailable live provider.
 
 ## Included
 
@@ -24,7 +24,7 @@ Local development accounts do not send email. Hosted accounts and actual bookmak
 - Durable write/auth limits, overdue-result reviews, audited operator recovery, and protected readiness checks.
 - Portfolio charts, win rate, bet history, CSV export, search, and sport filters.
 - The Odds API adapter for NBA, NFL, and NHL with a configurable reference bookmaker.
-- Supabase migrations, protected scheduled worker, Vercel configuration, and CI checks.
+- AWS deployment templates, private secrets, protected schedules, budget alerts, and CI checks.
 - A separate demonstration mode with illustrative spread/total markets and cross-game parlays.
 
 Connected betting currently supports moneyline singles. Unsupported markets cannot be accepted through the API. Missing or ambiguous results stay pending for review. A reset creates a new portfolio while preserving previous account records.
@@ -44,13 +44,15 @@ The coverage command enforces 80% lines, branches, and functions across backend 
 
 ## Setup and evidence
 
-- [Deployment and account configuration](docs/DEPLOYMENT.md)
+- [AWS deployment and account configuration](docs/AWS-DEPLOYMENT.md)
+- [Hosted database verification](docs/tdd/aws-hosted-database.md)
+- [AWS password recovery](docs/tdd/aws-recovery.md)
 - [TDD evidence](docs/releases/2.0.0/infrastructure.tdd.md)
 - [Database guarantees and RED/GREEN results](docs/tdd/database.md)
 - [Independent-session race checks](docs/tdd/postgres-race.md)
 - [Operations, monitoring, rollback, and restore runbook](docs/OPERATIONS.md)
 - [Production readiness fixes and remaining hosted gates](docs/tdd/production-readiness.md)
 
-The complete static UI is in `dist/`, portable backend modules are in `server/`, and database/runtime deployment sources are in `supabase/`. Private keys belong in environment settings, never in `dist/` or Git. Copy `.env.example` to `.env.local` when configuring services.
+The complete static UI is in `dist/`, portable backend modules are in `server/`, AWS hosting sources are in `aws/` and `infra/aws/`, and the original immutable financial migrations remain in `supabase/migrations/`. Private keys belong in environment settings, never in `dist/` or Git. Copy `.env.example` to `.env.local` when configuring services.
 
-Live-provider, hosted-auth, deployment, email delivery, scheduled HTTP delivery, independent hosted connections, and backup-restoration checks remain required in staging after those external accounts are configured.
+Hosted evidence is recorded in `docs/tdd/` and the deployment runbook. A public release stays gated until the hosted checks, operational contacts, privacy information, deletion process, live-provider quota, and funding review are complete. Legacy Supabase/Vercel adapters remain available for compatibility; the AWS deployment does not use those services.

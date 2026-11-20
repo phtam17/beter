@@ -13,7 +13,15 @@
     "test:postgres": "node --test tests/postgres-race.integration.mjs",
     "ops": "node scripts/ops.mjs",
     "typecheck": "node scripts/build-edge.mjs && tsc --noEmit",
-    "build": "npm run typecheck"
+    "build": "npm run typecheck",
+    "aws:package": "node scripts/aws-package.mjs",
+    "aws:deploy": "node scripts/aws-deploy.mjs",
+    "aws:publish": "node scripts/aws-publish.mjs",
+    "aws:migrate": "node scripts/aws-migrate.mjs",
+    "aws:check": "node scripts/aws-hosted-checks.mjs",
+    "aws:ops": "node scripts/aws-operations-checks.mjs",
+    "test:aws:postgres": "node --test tests/aws-auth-race.integration.mjs",
+    "test:aws:scram": "node --test tests/aws-scram.integration.mjs"
   },
   "engines": {
     "node": ">=22.18.0"
