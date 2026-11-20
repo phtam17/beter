@@ -25,7 +25,7 @@ function fixture(override,{gateway=false}={}){
     throw Error('unexpected test path');
   }
   const fetchImpl=async(url,init)=>{calls.push({url,init});return override?override(url,init,normal,privateState):normal(url,init);};
-  const run=options=>module.checkAwsHosted({state:privateState,fetchImpl,now:()=>new Date('2026-11-20T20:00:00Z'),randomId:()=> '00000000-0000-4000-8000-000000000001',...options});
+  const run=options=>module.checkAwsHosted({state:privateState,fetchImpl,requestIntervalMs:0,now:()=>new Date('2026-11-20T20:00:00Z'),randomId:()=> '00000000-0000-4000-8000-000000000001',...options});
   return{calls,run,state:privateState};
 }
 

@@ -36,14 +36,14 @@ function secureDeletion(response){
 }
 
 /** GET-only by default. Synthetic auth probes require an explicit option and never use a real email. */
-export async function checkAwsHosted({state,fetchImpl=globalThis.fetch,authProbes=false,now=()=>new Date(),randomId=randomUUID,timeoutMs=15000}={}){
+export async function checkAwsHosted({state,fetchImpl=globalThis.fetch,authProbes=false,now=()=>new Date(),randomId=randomUUID,timeoutMs=15000,requestIntervalMs=100}={}){
   const{site,api,topology}=targets(state);
-  if(typeof fetchImpl!=='function'||typeof authProbes!=='boolean'||!Number.isFinite(timeoutMs)||timeoutMs<1||timeoutMs>120000)throw invalidState();
+  if(typeof fetchImpl!=='function'||typeof authProbes!=='boolean'||!Number.isFinite(timeoutMs)||timeoutMs<1||timeoutMs>120000||!Number.isFinite(requestIntervalMs)||requestIntervalMs<0||requestIntervalMs>5000)throw invalidState();
   const checkedAt=now().toISOString();
   const secrets=[state.stagingAccess,...Object.values(state.runtime||{}).filter(value=>typeof value==='string'&&value.length>=8)];
   const gated={'x-beter-staging-access':state.stagingAccess};
   const browser={...gated,'x-beter-client':'browser'};
-  async function request(url,{headers={},method='GET',body}={}){
+  async function performRequest(url,{headers={},method='GET',body}={}){
     const controller=new AbortController();let timer;
     const deadline=new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(failure('REQUEST_TIMEOUT'));},timeoutMs);});
     const read=(async()=>{
@@ -61,6 +61,11 @@ export async function checkAwsHosted({state,fetchImpl=globalThis.fetch,authProbe
     })();
     try{return await Promise.race([read,deadline]);}
     finally{clearTimeout(timer);controller.abort();}
+  }
+  let previousRequest=Promise.resolve();
+  function request(url,options){
+    const task=previousRequest.then(async()=>{if(requestIntervalMs)await new Promise(resolve=>setTimeout(resolve,requestIntervalMs));return performRequest(url,options);});
+    previousRequest=task.catch(()=>{});return task;
   }
   async function check(name,url,options,verify){
     try{const{response,text}=await request(url,options);return{name,ok:verify(response,text)===true,status:response.status};}
