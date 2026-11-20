@@ -83,6 +83,16 @@ Post-hardening focused verification: **32 passed,0 failed,0 skipped** using the 
 
 The optional direct PostgreSQL fallback also rejects all URL query parameters. A localhost authority with `?host=remote` otherwise lets the driver's parsed host override the loopback transport exemption. `a36d740` captured RED4/5; the fix passed all19 direct/database/hosted-safety tests plus TypeScript. Host, hostaddr, service, port, user, password, database, options, and other query overrides are refused before constructing a pool. This does not change the deployed Data API path.
 
+## Actual Data API parameter typing
+
+The first actual hosted isolation run passed role/ownership checks but failed when persisting a fixture user. A coordinated read-only `pg_typeof` probe on Aurora confirmed that SDK `stringValue` is PostgreSQL `text`, JSON hints are `jsonb`, and `longValue` is `bigint`. The previous local bridge passed unknown string parameters, which let PostgreSQL infer UUID/integer types and masked the hosted mismatch.
+
+- `fa68ab6`: RED — the corrected bridge forces actual Data API types;25 tests executed,21 passed/4 failed for UUID/integer resolution, unreviewed signature rejection, and lost original errors during cleanup.
+- `a10a0d8`: GREEN — all25 tests passed. Reviewed fixed signature maps cast every public/auth argument to its declared UUID/integer/bigint/text/boolean/JSONB type; unknown names and arguments are rejected before authentication or transactions. TypeScript passed.
+- Additional31 runtime/sample/migration/direct tests passed after the fix. No SQL migration files or applied checksums changed.
+
+The diagnostic probe was read-only and returned only type names. No hosted fixture or financial writes were made by the author. A coordinated actual hosted rerun remains necessary to establish the final Aurora result.
+
 `aws/sql/finalize.sql` wraps normal maintenance with bounded removal of expired private sessions and historical access-hash lineage. It preserves active refresh families and the short replay grace. Bootstrap and financial migrations are immutable after application; subsequent changes need a new reviewed migration.
 
 ## Sources and limits
