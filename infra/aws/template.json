@@ -1323,9 +1323,17 @@
           ]
         },
         "VerificationMessageTemplate": {
-          "DefaultEmailOption": "CONFIRM_WITH_LINK",
-          "EmailSubjectByLink": "Verify your Beter account",
-          "EmailMessageByLink": "Confirm your Beter account: {##Verify your email##}"
+          "Fn::If": [
+            "HasSes",
+            {
+              "DefaultEmailOption": "CONFIRM_WITH_CODE",
+              "EmailSubject": "Verify your Beter account",
+              "EmailMessage": "Your Beter verification code is {####}. Enter this code in Beter to verify your email."
+            },
+            {
+              "DefaultEmailOption": "CONFIRM_WITH_CODE"
+            }
+          ]
         },
         "LambdaConfig": {
           "PreSignUp": {
