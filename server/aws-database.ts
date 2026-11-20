@@ -34,9 +34,10 @@ export function createPostgresDatabase({pool,connectionString,ssl,allowLocalInse
   if(!pool){
     let url:URL;try{url=new URL(connectionString||'');}catch{throw new TypeError('Configure a valid PostgreSQL connection.');}
     if(!['postgres:','postgresql:'].includes(url.protocol))throw new TypeError('Configure a PostgreSQL connection.');
+    if(url.search)throw new TypeError('PostgreSQL connection URL query parameters are not supported; configure the authority and verified TLS explicitly.');
     const local=['localhost','127.0.0.1','[::1]'].includes(url.hostname);
     const insecure=allowLocalInsecure&&local;
-    if([...url.searchParams.keys()].some(key=>key.toLowerCase().startsWith('ssl'))||(ssl===false&&!insecure)||(ssl&&typeof ssl==='object'&&ssl.rejectUnauthorized===false))throw new TypeError('Configure verified TLS for remote PostgreSQL; only explicit loopback connections can omit TLS.');
+    if((ssl===false&&!insecure)||(ssl&&typeof ssl==='object'&&ssl.rejectUnauthorized===false))throw new TypeError('Configure verified TLS for remote PostgreSQL; only explicit loopback connections can omit TLS.');
     pool=new Pool({connectionString,ssl:ssl??(insecure?false:{rejectUnauthorized:true}),max:4,connectionTimeoutMillis:5000,idleTimeoutMillis:30000,query_timeout:55000,statement_timeout:45000});
   }
   const selected=pool;
