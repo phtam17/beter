@@ -10,6 +10,13 @@ test('separate cold sample factories share one absolute start and final time',as
     const provider=createSampleProvider({startsAt,durationMs:120000,now:()=>new Date(startsAt.getTime()+offset)});const event=(await provider.getEvents())[0],result=(await provider.getResults())[0];assert.equal(event.starts_at,startsAt.toISOString());assert.equal(event.status,status);assert.equal(result.completed,completed);if(completed)assert.equal(result.updated_at,'2026-11-20T20:02:00.000Z');
   }
 });
+test('explicit sample epochs have stable distinct event IDs and matching result IDs',async()=>{
+  for(const sport of ['basketball_nba','americanfootball_nfl','icehockey_nhl']){
+    const first=createSampleProvider({startsAt,now:()=>new Date(startsAt)}),same=createSampleProvider({startsAt:new Date(startsAt),now:()=>new Date(startsAt.getTime()+1000)}),next=createSampleProvider({startsAt:new Date(startsAt.getTime()+1),now:()=>new Date(startsAt.getTime()+1000)});
+    const a=(await first.getEvents(sport))[0],b=(await same.getEvents(sport))[0],c=(await next.getEvents(sport))[0];assert.equal(a.id,b.id);assert.notEqual(a.id,c.id);assert.equal((await first.getResults(sport))[0].id,a.id);assert.equal((await next.getResults(sport))[0].id,c.id);
+  }
+  assert.equal((await createSampleProvider({now:()=>new Date(startsAt)}).getEvents())[0].id,'sample-nba-1');
+});
 test('sample options reject invalid dates, clocks and durations while preserving local defaults',async()=>{
   for(const options of [{startsAt:new Date(NaN)},{startsAt:'2026-11-20'},{durationMs:59999},{durationMs:10800001},{durationMs:NaN},{durationMs:60000.5},{now:()=>new Date(NaN)}])assert.throws(()=>createSampleProvider(options),/sample.*valid|valid.*sample/i);
   const now=new Date('2026-11-20T12:00:00.000Z'),provider=createSampleProvider({now:()=>now});assert.equal((await provider.getEvents())[0].starts_at,'2026-11-20T13:00:00.000Z');assert.equal((await provider.getResults())[0].completed,false);
