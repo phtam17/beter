@@ -19,6 +19,11 @@ test('insecure direct connections require an explicit loopback-only exemption an
   assert.equal(typeof implementation.createPostgresDatabase,'function');for(const options of [{connectionString:'postgresql://u:p@remote.example/beter',ssl:false},{connectionString:'postgresql://u:p@remote.example/beter',ssl:{rejectUnauthorized:false}},{connectionString:'postgresql://u:p@remote.example/beter',allowLocalInsecure:true,ssl:false},{connectionString:'postgresql://u:p@remote.example/beter?sslmode=disable'},{connectionString:'mysql://u:p@localhost/beter',allowLocalInsecure:true}])assert.throws(()=>implementation.createPostgresDatabase(options),/TLS|secure|PostgreSQL/i);
   const db=implementation.createPostgresDatabase({connectionString:'postgresql://u:p@127.0.0.1/beter',allowLocalInsecure:true});assert.equal(typeof db.query,'function');
 });
+test('direct connection URLs reject query parameters that could override validated host, TLS or identity',()=>{
+  for(const parameter of ['host=remote.example.com','hostaddr=203.0.113.1','service=remote','port=9999','user=other','password=other','dbname=other','database=other','options=-c%20ssl%3Doff','application_name=unreviewed','connect_timeout=0']){
+    assert.throws(()=>implementation.createPostgresDatabase({connectionString:'postgresql://fixture:private@localhost/beter?'+parameter,allowLocalInsecure:true}),/connection.*parameter|query.*parameter/i);
+  }
+});
 test('direct PostgreSQL validates parameters and serializes JSON arrays instead of PostgreSQL arrays',async()=>{
   assert.equal(typeof implementation.createPostgresDatabase,'function');const {pool,calls}=fixture();const db=implementation.createPostgresDatabase({pool});await db.query('select :items,:missing',{items:['one'],missing:null});assert.deepEqual(calls[0].values,['["one"]',null]);await assert.rejects(()=>db.query('select :n',{n:Number.MAX_SAFE_INTEGER+1}),/parameter/i);await assert.rejects(()=>db.query('select :missing'),/parameter/i);await db.close();assert.equal(calls.at(-1).sql,'end');
 });
