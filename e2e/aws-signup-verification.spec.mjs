@@ -48,3 +48,10 @@ test('a late verification cannot replace a switched account screen',async({page}
   const api=await setup(page,{delayed:true});await signup(page);await page.getByLabel('Verification code',{exact:true}).fill('012345');await page.getByRole('button',{name:'Verify email',exact:true}).click();await expect.poll(()=>api.calls.filter(call=>call.path==='/api/auth/verify').length).toBe(1);
   await page.getByRole('button',{name:'Back to sign in',exact:true}).click();await api.release();await expect(page.getByRole('dialog',{name:'Sign in to Beter',exact:true})).toBeVisible();await expect(page.getByText('Your email is verified. Sign in to continue.',{exact:true})).toHaveCount(0);await expect(page.getByLabel('Password',{exact:true})).toHaveValue('');
 });
+test('a delayed AWS configuration reveals Verify email without erasing credentials already being typed',async({page})=>{
+  let release;
+  await page.route('**/api/config',route=>{release=()=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({mode:'aws',dataMode:'sample'})});});
+  await page.route('**/api/auth/session',route=>route.fulfill({status:200,contentType:'application/json',body:'{"session":null}'}));
+  await page.goto('/');await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByLabel('Email address',{exact:true}).fill(email);await page.getByLabel('Password',{exact:true}).fill(password);await release();
+  await expect(page.getByRole('button',{name:'Verify email',exact:true})).toBeVisible();await expect(page.getByLabel('Email address',{exact:true})).toHaveValue(email);await expect(page.getByLabel('Password',{exact:true})).toHaveValue(password);
+});
