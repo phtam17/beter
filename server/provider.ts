@@ -215,10 +215,11 @@ export function createSampleProvider({now=()=>new Date(),startsAt,durationMs=10_
   const starts=new Date(startsAt?.getTime()??initial.getTime()+3_600_000);
   const finalAt=new Date(starts.getTime()+durationMs);
   if(!Number.isFinite(starts.getTime())||!Number.isFinite(finalAt.getTime()))throw new ProviderError('Sample feed requires a valid schedule.','sample_invalid_configuration');
+  const epoch=startsAt===undefined?'':'-'+starts.getTime();
   const fixtures: Record<string, { id: string; home: string; away: string; homeScore: number; awayScore: number; total: number }> = {
-    basketball_nba: { id: 'sample-nba-1', home: 'New York Knicks', away: 'Boston Celtics', homeScore: 108, awayScore: 104, total: 224.5 },
-    americanfootball_nfl: { id: 'sample-nfl-1', home: 'Buffalo Bills', away: 'Kansas City Chiefs', homeScore: 24, awayScore: 21, total: 47.5 },
-    icehockey_nhl: { id: 'sample-nhl-1', home: 'Boston Bruins', away: 'New York Rangers', homeScore: 3, awayScore: 2, total: 5.5 },
+    basketball_nba: { id: 'sample-nba-1'+epoch, home: 'New York Knicks', away: 'Boston Celtics', homeScore: 108, awayScore: 104, total: 224.5 },
+    americanfootball_nfl: { id: 'sample-nfl-1'+epoch, home: 'Buffalo Bills', away: 'Kansas City Chiefs', homeScore: 24, awayScore: 21, total: 47.5 },
+    icehockey_nhl: { id: 'sample-nhl-1'+epoch, home: 'Boston Bruins', away: 'New York Rangers', homeScore: 3, awayScore: 2, total: 5.5 },
   };
   return {
     async getEvents(sport = 'basketball_nba') {
