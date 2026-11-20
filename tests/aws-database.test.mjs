@@ -50,3 +50,8 @@ test('anonymous and service RPCs use only their fixed server-selected role, incl
   const backend=implementation.createAwsDatabaseBackend({database:db,authenticate:async()=>{throw Error('should not authenticate internal worker');},auth:async()=>({})});
   assert.equal((await backend.rpc('beter_health',{},'$service')).data.length,90000);assert.equal(calls[1].sql,'set local role service_role');calls.length=0;await backend.rpc('beter_markets');assert.equal(calls[1].sql,'set local role anon');
 });
+test('private auth-store queries preserve a missing session as JSON null and never put hashes in SQL',async()=>{
+  assert.equal(typeof implementation.createAwsAuthStore,'function');const calls=[];
+  const db={transaction:async fn=>fn({query:async(sql,parameters)=>{calls.push({sql,parameters});return{rows:sql.includes(' as part')?[{part:'null'}]:[]};}})};
+  const store=implementation.createAwsAuthStore(db);assert.equal(await store.getSessionByAccessHash('a'.repeat(64)),null);assert.doesNotMatch(calls.at(-1).sql,/a{64}/);assert.equal(calls[1].sql,'set local role service_role');
+});

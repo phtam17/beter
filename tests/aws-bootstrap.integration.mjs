@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile,readdir} from 'node:fs/promises';
 import {PGlite} from '@electric-sql/pglite';
+import {createDataApiDatabase,createAwsAuthStore} from '../server/aws-database.ts';
 const bootstrap=await readFile(new URL('../aws/sql/bootstrap.sql',import.meta.url),'utf8').catch(error=>{if(error.code==='ENOENT')return '';throw error;});
 const user='11111111-1111-4111-8111-111111111111';
 const session=(suffix='a')=>({accessHash:suffix.repeat(64),refreshHash:(suffix==='a'?'b':'d').repeat(64),userId:user,sealedTokens:'v1.private-encrypted-payload',accessExpiresAt:Date.now()+3600000,refreshExpiresAt:Date.now()+86400000});
@@ -32,4 +33,21 @@ test('session rotation cannot change account identity and expired tokens cannot 
 test('session revocation removes access and refresh handles together without changing financial identity',async()=>{
   const db=await database();try{await db.exec('set role service_role');await call(db,'beter_user_upsert',[user,'account@example.test'],['uuid','text']);const first=session();await call(db,'beter_session_put',[JSON.stringify(first)],['jsonb']);await call(db,'beter_session_revoke',[first.accessHash],['text']);assert.equal(await call(db,'beter_session_get',[first.refreshHash,'refresh'],['text','text']),null);await call(db,'beter_session_put',[JSON.stringify(session('c'))],['jsonb']);await call(db,'beter_sessions_revoke_user',[user],['uuid']);assert.equal(await call(db,'beter_session_get',[session('c').accessHash,'access'],['text','text']),null);
   }finally{await db.close();}
+});
+function transport(db,{allowDuplicateColumns=false}={}){
+  return{send:async command=>{
+    const kind=command.constructor.name;if(kind==='BeginTransactionCommand'){await db.exec('begin');return{transactionId:'local-transaction'};}if(kind==='CommitTransactionCommand'){await db.exec('commit');return{};}if(kind==='RollbackTransactionCommand'){await db.exec('rollback');return{};}
+    const values=[];const mapping=new Map((command.input.parameters||[]).map(p=>[p.name,p]));
+    const sql=command.input.sql.replace(/(?<!:):([a-z][a-z0-9_]*)/g,(match,key)=>{if(!mapping.has(key))return match;const p=mapping.get(key);values.push(p.value.isNull?null:p.value.stringValue??p.value.longValue??p.value.doubleValue??p.value.booleanValue);return'$'+values.length;});
+    const result=await db.query(sql,values);const names=result.fields.map(field=>field.name);
+    if(!allowDuplicateColumns&&new Set(names).size!==names.length)throw Object.assign(new Error('Duplicate result labels'),{name:'DatabaseErrorException'});
+    return{formattedRecords:JSON.stringify(result.rows)};
+  }};
+}
+function dataApi(db,options){return createDataApiDatabase({resourceArn:'arn:aws:rds:us-west-2:123456789012:cluster:test',secretArn:'arn:aws:secretsmanager:us-west-2:123456789012:secret:test',database:'beter',client:transport(db,options)});}
+test('Data API compatible auth transactions use unique projection labels',async()=>{
+  const db=await database();try{const store=createAwsAuthStore(dataApi(db));const account=await store.upsertUser({id:user,email:'account@example.test'});assert.equal(account.id,user);await store.createSession(session());assert.equal((await store.getSessionByAccessHash(session().accessHash)).user.id,user);}finally{await db.close();}
+});
+test('Data API scalar chunking preserves a missing private session as null',async()=>{
+  const db=await database();try{const store=createAwsAuthStore(dataApi(db,{allowDuplicateColumns:true}));assert.equal(await store.getSessionByAccessHash('a'.repeat(64)),null);}finally{await db.close();}
 });
