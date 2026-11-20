@@ -829,6 +829,9 @@ void (async()=>{
     sessionRestoring=false;updateAccountChrome();
   });
   try{appConfig=await api.config();}catch{appConfig={mode:'unconfigured',dataMode:'sample'};}
+  if(authDialog.open&&authMode==='signin'&&appConfig.mode==='aws'&&!authDialog.querySelector('[data-auth-mode="verify"]')){
+    const actions=document.createElement('div'),button=document.createElement('button');actions.className='auth-actions';button.type='button';button.className='text-button';button.dataset.authMode='verify';button.textContent='Verify email';actions.append(button);authDialog.querySelector('.auth-actions')?.after(actions);
+  }
   await sessionRestore;
   if(generation!==accountGeneration)return;
   if(api.session()){
