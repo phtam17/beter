@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
+import {readFile} from 'node:fs/promises';
+import {PGlite} from '@electric-sql/pglite';
 import {createApiHandler} from '../server/api.ts';
+import {createDataApiDatabase,createAwsAuthStore} from '../server/aws-database.ts';
 const {createCognitoAuthBackend}=await import('../server/aws-auth.ts').catch(error=>{if(error.code==='ERR_MODULE_NOT_FOUND')return{};throw error;});
 
 const id='11111111-1111-4111-8111-111111111111';
@@ -129,4 +132,27 @@ test('a short configured refresh lifetime also bounds the initial access lifetim
   const auth=f.adapter({refreshTtlMs:3600000}),result=await auth.auth('signin',{email,password:'a-long-private-password'});
   assert.ok(result.session.expires_at*1000<=[...f.sessions.values()][0].refreshExpiresAt);
   assert.equal((await auth.authenticate(result.session.access_token)).id,id);
+});
+test('encrypted Cognito sessions work through the real Data API query adapter and private PostgreSQL store',async()=>{
+  const db=new PGlite();
+  try{
+    await db.exec(await readFile(new URL('../aws/sql/bootstrap.sql',import.meta.url),'utf8'));
+    const transport={send:async command=>{
+      const name=command.constructor.name;
+      if(name==='BeginTransactionCommand'){await db.exec('begin');return{transactionId:'isolated-auth-test'};}
+      if(name==='CommitTransactionCommand'){await db.exec('commit');return{};}
+      if(name==='RollbackTransactionCommand'){await db.exec('rollback');return{};}
+      const parameters=new Map((command.input.parameters||[]).map(value=>[value.name,value]));const values=[];
+      const sql=command.input.sql.replace(/(?<!:):([a-z][a-z0-9_]*)/g,(match,key)=>{if(!parameters.has(key))return match;const value=parameters.get(key).value;values.push(value.isNull?null:value.stringValue??value.longValue??value.doubleValue??value.booleanValue);return'$'+values.length;});
+      return{formattedRecords:JSON.stringify((await db.query(sql,values)).rows)};
+    }};
+    const database=createDataApiDatabase({resourceArn:'arn:aws:rds:us-west-2:123456789012:cluster:auth-test',secretArn:'arn:aws:secretsmanager:us-west-2:123456789012:secret:auth-test',database:'beter',client:transport});
+    const f=fixture(),auth=f.adapter({store:createAwsAuthStore(database),now:()=>new Date()});
+    const first=await auth.auth('signin',{email,password:'a-long-private-password'});assert.equal((await auth.authenticate(first.session.access_token)).id,id);
+    const renewed=await auth.auth('refresh',{refresh_token:first.session.refresh_token});assert.equal((await auth.authenticate(renewed.session.access_token)).id,id);
+    assert.deepEqual(await auth.auth('refresh',{refresh_token:first.session.refresh_token}),renewed);
+    await auth.auth('signout',{},first.session.access_token);
+    await assert.rejects(()=>auth.authenticate(renewed.session.access_token),error=>error.status===401);
+    await db.exec('reset role');assert.equal((await db.query('select count(*)::integer as count from auth.aws_sessions')).rows[0].count,0);
+  }finally{await db.close();}
 });
