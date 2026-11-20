@@ -8,6 +8,8 @@ The temporary probe captures only the provider's HTTP status and validated numer
 
 Failures retain a quota object when any valid numeric headers were observed; missing/untrusted values are omitted. Successful checks still require all three quota fields. Quota also survives no-future-market, invalid-data, quota-validation and observed-header timeout paths.
 
+The final observed-header/body-timeout regression passes as well:13/13 probe cases pass, explicitly confirming that the single deadline aborts the body and preserves numeric quota already received. The broader provider/API regression target passed42 cases before adding this one verification case.
+
 The current [official provider error guide](https://the-odds-api.com/liveapi/guides/v4/api-error-codes.html) distinguishes invalid/deactivated keys from exhausted usage credits and explicitly documents HTTP429 for rate limits. It does not specify every HTTP-status/error-code pairing, so the operator should consider retained quota values alongside the requested classifier. Actual provider/hosted invocation remains the root agent's task; this update made no AWS/provider requests.
 
 Journey: an IAM-authorized temporary AWS function checks real provider egress, normalized future NBA moneylines, and remaining quota without loading application/database credentials or writing financial records. The root agent owns its deployment, invocation and cleanup.

@@ -64,3 +64,8 @@ test('a successful HTTP response with malformed provider data remains an invalid
   const f=fixture({fetchImpl:async()=>new Response('private invalid JSON '+apiKey,{headers:{'x-requests-remaining':'497','x-requests-used':'3','x-requests-last':'3'}})});
   assert.deepEqual(await f.probe(event),{ok:false,code:'PROVIDER_INVALID_DATA',quota:{remaining:497,used:3,lastCost:3}});
 });
+test('a body deadline preserves already observed numeric quota while aborting provider work',async()=>{
+  let signal;
+  const f=fixture({timeoutMs:15,fetchImpl:async(url,init)=>{signal=init.signal;return new Response(new ReadableStream({start(controller){init.signal.addEventListener('abort',()=>controller.error(init.signal.reason),{once:true});}}),{headers:{'x-requests-remaining':'497','x-requests-used':'3','x-requests-last':'3'}});}});
+  assert.deepEqual(await f.probe(event),{ok:false,code:'PROBE_TIMEOUT',quota:{remaining:497,used:3,lastCost:3}});assert.equal(signal.aborted,true);
+});
