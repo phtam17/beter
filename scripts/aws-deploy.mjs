@@ -66,7 +66,7 @@ export async function provisionDeployment({control=createAwsControl(),privateDir
 export async function deploymentStatus({control=createAwsControl(),privateDir=resolve('.data/aws-deploy')}={}){
  const state=JSON.parse(await readFile(join(privateDir,'state.json'),'utf8'));const result=await control.call('cloudformation','describe-stacks',{StackName:state.stackId||state.stackName});const stack=result.Stacks[0];
  const outputs=Object.fromEntries((stack.Outputs||[]).map(x=>[x.OutputKey,x.OutputValue]));state.outputs=outputs;await writeFile(join(privateDir,'state.json'),JSON.stringify(state,null,2)+'\n',{mode:0o600});
- return{stackName:state.stackName,status:stack.StackStatus,...(outputs.CloudFrontDomain?{url:'https://'+outputs.CloudFrontDomain}:{}),cutoffAt:state.cutoffAt};
+ return{stackName:state.stackName,status:stack.StackStatus,...(state.parameters?.FreeGatewayHosting!=='false'&&outputs.PublicGatewayOrigin?{url:outputs.PublicGatewayOrigin}:outputs.CloudFrontDomain?{url:'https://'+outputs.CloudFrontDomain}:{}),cutoffAt:state.cutoffAt};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
  try{const action=process.argv[2];const result=action==='prepare'?await prepareDeployment():action==='provision'?await provisionDeployment():action==='status'?await deploymentStatus():null;if(!result)throw Error('Choose prepare, provision, or status.');console.log(JSON.stringify({ok:true,...result}));}catch(error){console.error(JSON.stringify({ok:false,message:error.message}));process.exitCode=1;}
