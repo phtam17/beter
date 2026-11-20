@@ -72,5 +72,10 @@ test('free generated hostname bypasses only paid-domain assertions while preserv
 });
 test('AWS sample timing stays fixed across API worker and monitor cold starts with a bounded settlement window',()=>{
  assert.equal(template.Parameters.SampleStartAt?.Default,'');assert.equal(template.Parameters.SampleDurationSeconds?.Default,10800);assert.equal(template.Parameters.SampleDurationSeconds?.MinValue,60);assert.equal(template.Parameters.SampleDurationSeconds?.MaxValue,10800);
- for(const name of ['ApiFunction','WorkerFunction','MonitorFunction']){const env=resource(name).Properties.Environment.Variables;assert.equal(env.BETER_SAMPLE_START_AT?.Ref,'SampleStartAt');assert.equal(env.BETER_SAMPLE_DURATION_SECONDS?.Ref,'SampleDurationSeconds');}
+ for(const name of ['ApiFunction','WorkerFunction','MonitorFunction']){const env=resource(name).Properties.Environment.Variables;assert.deepEqual(env.BETER_SAMPLE_START_AT,{'Fn::If':['IsSampleData',{Ref:'SampleStartAt'},{Ref:'AWS::NoValue'}]});assert.deepEqual(env.BETER_SAMPLE_DURATION_SECONDS,{'Fn::If':['IsSampleData',{Ref:'SampleDurationSeconds'},{Ref:'AWS::NoValue'}]});}
+});
+
+test('live provider functions omit every sample override instead of passing empty or default values',()=>{
+ assert.deepEqual(template.Conditions.IsSampleData,{'Fn::Equals':[{Ref:'DataMode'},'sample']});
+ for(const name of ['ApiFunction','WorkerFunction','MonitorFunction'])for(const key of ['BETER_SAMPLE_START_AT','BETER_SAMPLE_DURATION_SECONDS'])assert.deepEqual(resource(name).Properties.Environment.Variables[key]['Fn::If']?.[2],{Ref:'AWS::NoValue'});
 });
