@@ -52,6 +52,13 @@ test('Cognito sign-in verifies provider identity and returns only compact opaque
   assert.equal(f.calls[0].name,'InitiateAuthCommand');assert.equal(f.calls[0].input.AuthFlow,'USER_PASSWORD_AUTH');assert.equal(f.calls[0].input.AuthParameters.USERNAME,email);assert.equal(f.calls[1].name,'GetUserCommand');
   const row=[...f.sessions.values()][0];assert.equal(row.accessHash,hash(result.session.access_token));assert.equal(row.refreshHash,hash(result.session.refresh_token));assert.equal(row.userId,id);assert.doesNotMatch(row.sealedTokens,/provider-access|provider-refresh|provider-id-token/);assert.equal(row.previousRefreshHash??null,null);
 });
+test('verified Cognito sub accepts canonical UUID hex without imposing RFC version or variant bits',async()=>{
+  const cognitoId='11111111-1111-7111-0111-111111111111',f=fixture({providerId:cognitoId}),auth=f.adapter();
+  assert.equal((await auth.auth('signup',{email,password:'a-long-private-password'})).requiresConfirmation,true);
+  const first=await auth.auth('signin',{email,password:'a-long-private-password'});assert.equal(first.session.user.id,cognitoId);assert.equal((await auth.authenticate(first.session.access_token)).id,cognitoId);
+  f.advance(3600001);const next=await auth.auth('refresh',{refresh_token:first.session.refresh_token});assert.equal(next.session.user.id,cognitoId);assert.equal((await auth.authenticate(next.session.access_token)).id,cognitoId);
+  await auth.auth('signout',{},next.session.access_token);await assert.rejects(()=>auth.authenticate(next.session.access_token),error=>error.status===401);assert.equal(f.sessions.size,0);
+});
 test('large provider tokens fit the actual secure browser cookie transport',async()=>{
   const f=fixture({largeTokens:true}),auth=f.adapter();const handle=createApiHandler({backend:{...auth,rpc:async()=>({})},config:{mode:'aws',dataMode:'sample',liveOddsConfigured:false,sessionSecret:secret}});
   const response=await handle(new Request('https://beter.example/api/auth/signin',{method:'POST',headers:{Origin:'https://beter.example','X-Beter-Client':'browser','Content-Type':'application/json'},body:JSON.stringify({email,password:'a-long-private-password'})}));
