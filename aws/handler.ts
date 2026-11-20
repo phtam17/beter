@@ -1,4 +1,5 @@
 import {timingSafeEqual} from 'node:crypto';
+import {awsSecurityHeaders,gatewayAccess} from './web-handler.ts';
 
 type Runtime={
   settings?:{siteUrl?:string;jobSecret?:string;originSecret?:string;environment?:string};
@@ -7,9 +8,9 @@ type Runtime={
   runJobs:()=>Promise<unknown>;
 };
 type Metric={name:'WorkerSuccess'|'ReadinessSuccess';value:0|1};
-type Options={getRuntime?:()=>Promise<Runtime>;workerTask?:'process'|'monitor';onMetric?:(metric:Metric)=>void;env?:Record<string,string|undefined>};
+type Options={getRuntime?:()=>Promise<Runtime>;workerTask?:'process'|'monitor';onMetric?:(metric:Metric)=>void;env?:Record<string,string|undefined>;publicGateway?:boolean;now?:()=>Date};
 type HttpEvent={version?:string;rawPath?:string;rawQueryString?:string;headers?:Record<string,string|undefined>;cookies?:string[];body?:string;isBase64Encoded?:boolean;requestContext?:{http?:{method?:string;sourceIp?:string}};source?:string;task?:string};
-const safeResponse=(statusCode:number,code:string,message:string)=>({statusCode,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'},body:JSON.stringify({error:{code,message}}),isBase64Encoded:false});
+const safeResponse=(statusCode:number,code:string,message:string)=>({statusCode,headers:{...awsSecurityHeaders,'content-type':'application/json; charset=utf-8','cache-control':'no-store'},body:JSON.stringify({error:{code,message}}),isBase64Encoded:false});
 const denied=()=>safeResponse(403,'FORBIDDEN','This endpoint is not available through this connection.');
 const safeIp=(value:unknown):value is string=>typeof value==='string'&&value.length<=64&&/^[0-9a-f:.]+$/i.test(value);
 function matches(left:string,right:string){const a=Buffer.from(left),b=Buffer.from(right);return a.length===b.length&&timingSafeEqual(a,b);}
@@ -22,7 +23,7 @@ function fundingExpired(env:Record<string,string|undefined>){
 const fundingRequired=()=>safeResponse(503,'FUNDING_REVIEW_REQUIRED','This environment is paused for a funding review.');
 
 /** The API and scheduled functions are separate IAM targets using the same artifact. */
-export function createAwsHandler({getRuntime,workerTask,onMetric,env=process.env}:Options={}){
+export function createAwsHandler({getRuntime,workerTask,onMetric,env=process.env,publicGateway=env.BETER_PUBLIC_GATEWAY==='true',now=()=>new Date()}:Options={}){
   let pending:Promise<Runtime>|undefined;
   const runtime=()=>{
     pending??=(getRuntime?getRuntime():import('../server/aws-runtime.ts').then(module=>module.createAwsRuntime({env}))).catch(error=>{pending=undefined;throw error;});
@@ -52,14 +53,15 @@ export function createAwsHandler({getRuntime,workerTask,onMetric,env=process.env
       }
     }
     if(workerTask)return denied();
+    if(publicGateway){const gated=gatewayAccess(event,{env,now});if(gated)return gated;}
     const headers=new Headers();
     for(const [name,value]of Object.entries(event.headers||{}))if(typeof value==='string')headers.set(name,value);
-    const provided=headers.get('x-beter-origin-secret');if(!provided)return denied();
-    if(fundingExpired(env))return fundingRequired();
+    const provided=headers.get('x-beter-origin-secret');
+    if(!publicGateway&&!provided)return denied();
+    if(!publicGateway&&fundingExpired(env))return fundingRequired();
     try{
-      const app=await runtime();const expected=app.originSecret||app.settings?.originSecret||'';
-      if(expected.length<32)return safeResponse(503,'SETUP_REQUIRED','The application connection is not configured.');
-      if(!matches(provided,expected))return denied();
+      const app=await runtime();
+      if(!publicGateway){const expected=app.originSecret||app.settings?.originSecret||'';if(expected.length<32)return safeResponse(503,'SETUP_REQUIRED','The application connection is not configured.');if(!matches(provided!,expected))return denied();}
       const path=event.rawPath||'/';let decoded:string;
       try{decoded=decodeURIComponent(path);}catch{return safeResponse(400,'INVALID_REQUEST','Send a valid request path.');}
       if(!path.startsWith('/')||/[\\?#\u0000-\u001f]/.test(decoded)||decoded.split('/').some(part=>part==='.'||part==='..'))return safeResponse(400,'INVALID_REQUEST','Send a valid request path.');
@@ -72,8 +74,9 @@ export function createAwsHandler({getRuntime,workerTask,onMetric,env=process.env
       if(body.length>(method==='POST'&&path==='/api/ops/resolve'?1048576:32768))return safeResponse(413,'BODY_TOO_LARGE','The request is too large.');
       const viewerIp=headers.get('x-beter-viewer-ip');
       for(const name of ['host','forwarded','x-forwarded-proto','x-forwarded-host','x-forwarded-for','x-beter-origin-secret','x-beter-viewer-ip','x-beter-staging-access','x-beter-source-ip'])headers.delete(name);
-      const source=safeIp(viewerIp)?viewerIp:event.requestContext?.http?.sourceIp;
+      const source=!publicGateway&&safeIp(viewerIp)?viewerIp:event.requestContext?.http?.sourceIp;
       if(safeIp(source))headers.set('x-beter-source-ip',source);
+      if(publicGateway&&/^Basic\s/i.test(headers.get('authorization')||''))headers.delete('authorization');
       if(event.cookies){if(!Array.isArray(event.cookies)||!event.cookies.every(cookie=>typeof cookie==='string'))return safeResponse(400,'INVALID_REQUEST','Send valid account cookies.');headers.set('Cookie',event.cookies.join('; '));}
       const origin=new URL(app.settings?.siteUrl||'');
       if(origin.protocol!=='https:'||origin.username||origin.password||origin.pathname!=='/'||origin.search||origin.hash)throw new Error('Invalid deployment origin');
@@ -81,6 +84,7 @@ export function createAwsHandler({getRuntime,workerTask,onMetric,env=process.env
       const response=await app.handle(request),output=new Headers(response.headers);
       const cookies=typeof response.headers.getSetCookie==='function'?response.headers.getSetCookie():response.headers.has('set-cookie')?[response.headers.get('set-cookie')!]:[];
       output.delete('set-cookie');output.delete('content-length');output.set('Cache-Control','no-store');output.set('X-Content-Type-Options','nosniff');
+      for(const[name,value]of Object.entries(awsSecurityHeaders))output.set(name,value);
       const textual=/^(text\/|application\/(?:[a-z.+-]*json|javascript))/i.test(output.get('Content-Type')||'application/json');
       const bytes=Buffer.from(await response.arrayBuffer());
       return{statusCode:response.status,headers:Object.fromEntries(output),...(cookies.length?{cookies}:{}),body:bytes.toString(textual?'utf8':'base64'),isBase64Encoded:!textual};
