@@ -86,3 +86,6 @@ test('signup codes use the default Cognito message unless verified SES permits a
  const [condition,ses,standard]=verification['Fn::If'];assert.equal(condition,'HasSes');assert.deepEqual(standard,{DefaultEmailOption:'CONFIRM_WITH_CODE'});assert.equal(ses.DefaultEmailOption,'CONFIRM_WITH_CODE');assert.match(ses.EmailMessage,/\{####\}/);assert.ok(ses.EmailSubject);assert.equal(ses.EmailMessageByLink,undefined);assert.equal(ses.EmailSubjectByLink,undefined);
  const client=resource('UserPoolClient').Properties;assert.equal(client.AllowedOAuthFlows,undefined);assert.equal(client.CallbackURLs,undefined);
 });
+test('all runtime functions share the configured private support notification destination',()=>{
+ for(const name of ['ApiFunction','WorkerFunction','MonitorFunction'])assert.deepEqual(template.Resources[name].Properties.Environment.Variables.BETER_SUPPORT_TOPIC_ARN,{Ref:'NotificationTopic'});
+});
