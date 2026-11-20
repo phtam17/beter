@@ -27,7 +27,7 @@ test('one setup form resets the password then signs in and loads the private por
 });
 for(const cancel of ['close','back'])test(`${cancel} during a delayed reset prevents a later automatic sign-in`,async({page})=>{
   const api=await setup(page,{delayed:true});await fill(page);await page.getByRole('button',{name:'Set password and sign in',exact:true}).click();await expect.poll(()=>api.calls.some(call=>call.path==='/api/auth/confirm')).toBe(true);
-  await page.getByRole('button',{name:cancel==='close'?'Close account dialog':'Back to sign in',exact:true}).click();await api.release();await expect.poll(()=>api.calls.filter(call=>call.path==='/api/auth/signin').length).toBe(0);
+  await page.getByRole('button',{name:cancel==='close'?'Close account dialog':'Back to sign in',exact:true}).click();await api.release();await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));expect(api.calls.filter(call=>call.path==='/api/auth/signin')).toHaveLength(0);
   if(cancel==='close')await expect(page.locator('#auth-dialog')).not.toBeVisible();else await expect(page.getByRole('dialog',{name:'Sign in to Beter',exact:true})).toBeVisible();
 });
 test('a successful reset followed by failed sign-in says the password was saved and offers normal sign-in',async({page})=>{

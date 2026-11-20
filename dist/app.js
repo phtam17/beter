@@ -3,6 +3,9 @@ import { events as demoEvents, sports, marketNames, getSelection } from './marke
 import { createApiClient, adaptPortfolio } from './api-client.js';
 import { saveDraft, loadDraft, clearDraft } from './drafts.js';
 
+let passwordSetupIntent=consumePasswordSetupLink();
+let passwordSetup=false;
+
 const paths = {
   grid:'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',
   ticket:'M4 4h16v5a3 3 0 0 0 0 6v5H4v-5a3 3 0 0 0 0-6zM14 5v3m0 3v2m0 3v3',
@@ -416,7 +419,7 @@ document.addEventListener('click',async event=>{
     else if(button.dataset.action==='retry-account')await loadAccount();
     else if(button.dataset.action==='refresh-board')await loadAccount();
     else if(button.dataset.action==='revise-quote'){invalidateQuote();render();document.querySelector('#stake')?.focus();}
-    else if(button.dataset.authMode){authAttempt++;api.cancelAuthentication?.();authBusy=false;authEmail=document.querySelector('#auth-email')?.value||authEmail;authMode=button.dataset.authMode;authError='';authMessage='';renderAuth();focusElement(document.querySelector('#auth-email')||document.querySelector('#auth-password'));}
+    else if(button.dataset.authMode){authAttempt++;api.cancelAuthentication?.();passwordSetupIntent=null;passwordSetup=false;authBusy=false;authEmail=document.querySelector('#auth-email')?.value||authEmail;authMode=button.dataset.authMode;authError='';authMessage='';renderAuth();focusElement(document.querySelector('#auth-email')||document.querySelector('#auth-password'));}
     else if(button.dataset.action==='resend-recovery')await submitAuth(document.querySelector('#auth-form'),{resend:true});
     else if(button.dataset.action==='resend-signup')await submitAuth(document.querySelector('#auth-form'),{resend:'signup'});
     else if(button.dataset.action==='signout')await signOutAccount();
@@ -712,19 +715,20 @@ async function loadAccount({quiet=false}={}) {
 }
 function renderAuth() {
   const managing=authMode==='manage',recovering=authMode==='recover',resetting=authMode==='reset',confirming=authMode==='confirm',verifying=authMode==='verify',signup=authMode==='signup',newPassword=resetting||confirming||signup;
-  const title=managing?'Your Beter account':verifying?'Verify your email':confirming?'Reset your password':resetting?'Choose a new password':recovering?'Recover your account':signup?'Create your Beter account':'Sign in to Beter';
-  const description=verifying?'Confirm your email address with the code from your signup email. Need a new code? Choose Resend code.':confirming?'Choose a new password. You’ll sign in again after updating it.':resetting?'Use at least 10 characters. This link is verified by the account service.':recovering?'Enter your email address to request password recovery instructions.':signup?'Start with $10,000 in virtual funds. Your records stay with your account.':'Keep your virtual portfolio and practice history together.';
+  const title=managing?'Your Beter account':verifying?'Verify your email':confirming?(passwordSetup?'Set your password':'Reset your password'):resetting?'Choose a new password':recovering?'Recover your account':signup?'Create your Beter account':'Sign in to Beter';
+  const description=verifying?'Confirm your email address with the code from your signup email. Need a new code? Choose Resend code.':confirming?(passwordSetup?'Enter the code already sent to your email, choose your password, and sign in.':'Choose a new password. You’ll sign in again after updating it.'):resetting?'Use at least 10 characters. This link is verified by the account service.':recovering?'Enter your email address to request password recovery instructions.':signup?'Start with $10,000 in virtual funds. Your records stay with your account.':'Keep your virtual portfolio and practice history together.';
   authDialog.innerHTML=`<form method="dialog" class="dialog-top"><span class="dialog-symbol">${icon('shield')}</span><button type="submit" class="icon-button" aria-label="Close account dialog">×</button></form>
     <h2 id="auth-title">${title}</h2>${managing?`<p class="dialog-description">${esc(api.session()?.user.email||'Your account')}</p><p class="auth-help">${appConfig.mode==='local'?'This is a local development account. Its portfolio is stored on this server and uses sample markets.':'Your practice portfolios are saved to your account.'}</p><button type="button" class="button secondary auth-submit" data-action="signout" ${authBusy?'disabled':''}>Sign out</button>`:`
     <p class="dialog-description">${description}</p><form id="auth-form" method="post">
     ${resetting?'':`<label for="auth-email">Email address</label><input id="auth-email" name="email" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" maxlength="254" value="${esc(authEmail)}" required ${confirming?'readonly':''} ${authBusy?'disabled':''}>`}
     ${confirming||verifying?`<label for="auth-code">Verification code</label><p id="auth-code-hint" class="auth-help">Enter the 6-digit code from your email. You can paste it here.</p><input id="auth-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" autocapitalize="none" spellcheck="false" pattern="[0-9]{6}" minlength="6" maxlength="6" aria-describedby="auth-code-hint" required ${authBusy?'disabled':''}>`:''}
     ${recovering||verifying?'':`<label for="auth-password">${resetting||confirming?'New password':'Password'}</label>${confirming?'<p id="auth-password-hint" class="auth-help">Use 10 to 200 characters.</p>':''}<input id="auth-password" name="password" type="password" autocomplete="${newPassword?'new-password':'current-password'}" minlength="${newPassword?10:1}" maxlength="200" ${confirming?'aria-describedby="auth-password-hint"':''} required ${authBusy?'disabled':''}>`}
-    <button type="submit" class="button primary auth-submit" ${authBusy?'disabled aria-busy="true"':''}>${authBusy?'Please wait…':verifying?'Verify email':resetting||confirming?'Update password':recovering?'Send recovery email':signup?'Create account':'Sign in'}</button></form>
+    <button type="submit" class="button primary auth-submit" ${authBusy?'disabled aria-busy="true"':''}>${authBusy?'Please wait…':verifying?'Verify email':passwordSetup&&confirming?'Set password and sign in':resetting||confirming?'Update password':recovering?'Send recovery email':signup?'Create account':'Sign in'}</button></form>
     <div class="auth-actions">${confirming?`<button type="button" class="text-button" data-action="resend-recovery" ${authBusy?'disabled':''}>Resend code</button><button type="button" class="text-button" data-auth-mode="recover">Change email</button>`:''}${verifying?`<button type="button" class="text-button" data-action="resend-signup" ${authBusy?'disabled':''}>Resend code</button>`:''}${!resetting?`<button type="button" class="text-button" data-auth-mode="${signup||recovering||confirming||verifying?'signin':'signup'}">${signup||recovering||confirming||verifying?'Back to sign in':'Create account'}</button>${!signup&&!recovering&&!confirming&&!verifying?'<button type="button" class="text-button" data-auth-mode="recover">Forgot password?</button>':''}`:''}</div>${authMode==='signin'&&appConfig.mode==='aws'?'<div class="auth-actions"><button type="button" class="text-button" data-auth-mode="verify">Verify email</button></div>':''}`}
     <p class="form-error" id="auth-error" role="alert">${esc(authError)}</p><p class="auth-message" id="auth-message" role="status">${esc(authMessage)}</p>${!managing&&!resetting?`<p class="auth-help">${appConfig.mode==='local'?'Local development account. Email verification and delivery are not enabled.':'All funds and bets are virtual.'}</p>`:''}`;
 }
 function openAccount() {
+  passwordSetupIntent=null;passwordSetup=false;
   if(api.logoutState().pending){void signOutAccount();return;}
   authAttempt++;api.cancelAuthentication?.();
   authMode=api.session()?'manage':'signin';authError='';authMessage='';authBusy=false;renderAuth();authDialog.showModal();
@@ -734,6 +738,7 @@ async function submitAuth(form,{resend=false}={}) {
   if(authBusy||!form||(resend?!form.elements.email.reportValidity():!form.reportValidity()))return;
   const attempt=++authAttempt;
   const action=resend==='signup'?'resend':resend?'recover':authMode;
+  const settingPassword=action==='confirm'&&passwordSetup;
   const password=form.elements.password?.value;
   const code=form.elements.code?.value;
   authEmail=form.elements.email?.value.trim()||authEmail;
@@ -759,7 +764,13 @@ async function submitAuth(form,{resend=false}={}) {
       authMessage=result.message||'If this account exists, check your email for recovery instructions.';
     } else if(action==='confirm') {
       await api.confirmRecovery(authEmail,code,password);if(attempt!==authAttempt)return;
-      authMode='signin';authMessage='Your password has been updated. Sign in with your new password.';
+      if(settingPassword){
+        if(!authDialog.open)return;
+        passwordSetup=false;
+        try{await api.signin(authEmail,password);if(attempt!==authAttempt||!authDialog.open)return;if(!api.session())throw new Error('Sign in did not complete.');}
+        catch{if(attempt===authAttempt&&authDialog.open){authMode='signin';authError='';authMessage='Your password has been saved. Sign in with your new password to continue.';}return;}
+        persistSlip();accountMode=true;accountGeneration++;placementInFlight=false;stakeError='';accountRequest=null;betBusy=false;selections=[];restoredScope=null;draftMessage='';placementReceipt='';invalidateQuote();mode='single';authDialog.close();await loadAccount();
+      }else{authMode='signin';authMessage='Your password has been updated. Sign in with your new password.';}
     } else {
       const result=await (action==='signup'?api.signup(authEmail,password):api.signin(authEmail,password));
       if(attempt!==authAttempt)return;
@@ -781,7 +792,7 @@ async function signOutAccount() {
 }
 function hideAccount() {
   accountGeneration++;placementInFlight=false;stakeError='';accountRequest=null;betBusy=false;accountMode=false;accountLoading=false;accountError='';refreshError='';events=demoEvents;state=loadState();selections=[];restoredScope=null;draftMessage='';placementReceipt='';invalidateQuote();mode='single';restoreSlip();
-  authEmail='';authError='';authMessage='';recoveryToken=null;
+  authEmail='';authError='';authMessage='';recoveryToken=null;passwordSetupIntent=null;passwordSetup=false;
   authDialog.replaceChildren();
 }
 document.querySelector('#retry-signout').addEventListener('click',()=>void signOutAccount());
@@ -800,6 +811,19 @@ function openHelp() {
 }
 document.querySelector('#footer-help').addEventListener('click',openHelp);
 helpDialog.addEventListener('close',()=>document.querySelector('#footer-help').focus());
+function consumePasswordSetupLink(){
+  const url=new URL(location.href),fragment=new URLSearchParams(url.hash.slice(1));
+  if(!fragment.has('setup-password'))return null;
+  const values=fragment.getAll('setup-password');
+  history.replaceState(null,'',url.pathname+url.search+'#overview');
+  if(values.length!==1)return null;
+  const email=values[0].trim().toLowerCase(),input=document.createElement('input');input.type='email';input.required=true;input.value=email;
+  return email.length<=254&&/^\S+@\S+\.\S+$/.test(email)&&input.checkValidity()?email:null;
+}
+function openPasswordSetupIntent(){
+  if(!passwordSetupIntent||appConfig.mode!=='aws')return;
+  const email=passwordSetupIntent;passwordSetupIntent=null;passwordSetup=true;authAttempt++;api.cancelAuthentication?.();authMode='confirm';authEmail=email;authError='';authMessage='';authBusy=false;renderAuth();if(!authDialog.open)authDialog.showModal();focusElement(document.querySelector('#auth-code'));
+}
 function readRecoveryLink() {
   const url=new URL(location.href),fragment=new URLSearchParams(url.hash.slice(1));
   const type=fragment.get('type')||url.searchParams.get('type');
@@ -812,12 +836,12 @@ function readRecoveryLink() {
   else if(token){authMode='signin';authMessage='Your email link was opened. Sign in to continue.';renderAuth();authDialog.showModal();}
 }
 document.querySelector('#account-button').addEventListener('click',openAccount);
-authDialog.addEventListener('close',()=>{authAttempt++;api.cancelAuthentication?.();authBusy=false;authDialog.querySelectorAll('input[type="password"],#auth-code').forEach(input=>{input.value='';});focusElement(document.querySelector('#account-button'));});
+authDialog.addEventListener('close',()=>{authAttempt++;api.cancelAuthentication?.();passwordSetupIntent=null;passwordSetup=false;authBusy=false;authDialog.querySelectorAll('input[type="password"],#auth-code').forEach(input=>{input.value='';});focusElement(document.querySelector('#account-button'));});
 authDialog.addEventListener('click',event=>{if(event.target===authDialog){const rect=authDialog.getBoundingClientRect();if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom)authDialog.close();}});
 function editingForm(){return Boolean(document.activeElement?.matches('input,textarea,select,[contenteditable="true"]'));}
 window.addEventListener('focus',()=>{if(accountMode&&!accountLoading&&!selections.length&&!authDialog.open&&!dialog.open&&!editingForm())void loadAccount({quiet:true});});
 setInterval(()=>{if(accountMode&&!document.hidden&&!accountLoading&&!selections.length&&!authDialog.open&&!dialog.open&&!editingForm())void loadAccount({quiet:true});},30000);
-window.addEventListener('hashchange',()=>{render();window.scrollTo({top:0,behavior:'instant'});document.querySelector('#main').focus({preventScroll:true});});
+window.addEventListener('hashchange',()=>{const setup=consumePasswordSetupLink();if(setup){passwordSetupIntent=setup;openPasswordSetupIntent();return;}render();window.scrollTo({top:0,behavior:'instant'});document.querySelector('#main').focus({preventScroll:true});});
 let resizePending=false;
 window.addEventListener('resize',()=>{if(!resizePending){resizePending=true;requestAnimationFrame(()=>{redrawChart();resizePending=false;});}});
 if(!accountMode)restoreSlip();
@@ -825,14 +849,16 @@ render();
 readRecoveryLink();
 void (async()=>{
   const generation=accountGeneration;
-  const sessionRestore=(api.restoreSession?api.restoreSession().catch(()=>null):Promise.resolve(null)).finally(()=>{
+  const sessionRestore=(!passwordSetupIntent&&api.restoreSession?api.restoreSession().catch(()=>null):Promise.resolve(null)).finally(()=>{
     sessionRestoring=false;updateAccountChrome();
   });
   try{appConfig=await api.config();}catch{appConfig={mode:'unconfigured',dataMode:'sample'};}
+  openPasswordSetupIntent();
   if(authDialog.open&&authMode==='signin'&&appConfig.mode==='aws'&&!authDialog.querySelector('[data-auth-mode="verify"]')){
     const actions=document.createElement('div'),button=document.createElement('button');actions.className='auth-actions';button.type='button';button.className='text-button';button.dataset.authMode='verify';button.textContent='Verify email';actions.append(button);authDialog.querySelector('.auth-actions')?.after(actions);
   }
   await sessionRestore;
+  if(passwordSetup)return;
   if(generation!==accountGeneration)return;
   if(api.session()){
     persistSlip();accountMode=true;accountGeneration++;placementInFlight=false;stakeError='';
