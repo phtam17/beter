@@ -41,3 +41,13 @@ test('edge gate hashes browser/machine access and strips gate credentials before
 test('edge funding cutoff overrides public launch and never reaches an origin',()=>{
   for(const cutoff of ['2000-01-01T00:00:00','invalid']){const {handler}=edge({open:true,cutoff});const response=handler({viewer:{ip:'203.0.113.2'},request:{headers:{}}});assert.equal(response.statusCode,503);assert.match(response.body,/funding review/);}
 });
+
+test('low-quota accounts opt in to concurrency reservations only after a quota review',()=>{
+  assert.equal(template.Parameters.EnableReservedConcurrency?.Default,'false');
+  assert.deepEqual(template.Conditions.UseReservedConcurrency,{'Fn::Equals':[{Ref:'EnableReservedConcurrency'},'true']});
+  for(const [name,count] of [['PreSignupFunction',1],['ApiFunction',2],['WorkerFunction',1],['MonitorFunction',1]]){
+    assert.deepEqual(resource(name).Properties.ReservedConcurrentExecutions,{'Fn::If':['UseReservedConcurrency',count,{Ref:'AWS::NoValue'}]});
+  }
+  assert.ok(resource('ApiStage').Properties.DefaultRouteSettings.ThrottlingBurstLimit<=20);
+  assert.ok(resource('ApiStage').Properties.DefaultRouteSettings.ThrottlingRateLimit<=10);
+});
