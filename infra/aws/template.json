@@ -594,25 +594,11 @@
           }
         ],
         "ServerlessV2ScalingConfiguration": {
-          "MinCapacity": {
-            "Fn::If": [
-              "IsProduction",
-              0.5,
-              0
-            ]
-          },
+          "MinCapacity": 0,
           "MaxCapacity": {
             "Ref": "MaxDatabaseAcu"
           },
-          "SecondsUntilAutoPause": {
-            "Fn::If": [
-              "IsProduction",
-              {
-                "Ref": "AWS::NoValue"
-              },
-              600
-            ]
-          }
+          "SecondsUntilAutoPause": 600
         },
         "EnableCloudwatchLogsExports": [
           "postgresql"
@@ -1400,24 +1386,8 @@
             "ALLOWED_ORIGINS": {
               "Ref": "SiteOrigin"
             },
-            "AWS_DATABASE_NAME": "beter",
-            "AWS_DATABASE_RESOURCE_ARN": {
-              "Fn::GetAtt": [
-                "DatabaseCluster",
-                "DBClusterArn"
-              ]
-            },
-            "AWS_DATABASE_SECRET_ARN": {
-              "Ref": "AppDatabaseSecret"
-            },
             "BETER_RUNTIME_SECRET_ARN": {
               "Ref": "RuntimeSecretArn"
-            },
-            "AWS_COGNITO_USER_POOL_ID": {
-              "Ref": "UserPool"
-            },
-            "AWS_COGNITO_CLIENT_ID": {
-              "Ref": "UserPoolClient"
             },
             "BETER_SUPPORT_URL": {
               "Ref": "SupportUrl"
@@ -1427,6 +1397,25 @@
             },
             "BETER_ACCOUNT_DELETION_URL": {
               "Ref": "AccountDeletionUrl"
+            },
+            "BETER_DATABASE_NAME": "beter",
+            "BETER_DATABASE_RESOURCE_ARN": {
+              "Fn::GetAtt": [
+                "DatabaseCluster",
+                "DBClusterArn"
+              ]
+            },
+            "BETER_DATABASE_SECRET_ARN": {
+              "Ref": "AppDatabaseSecret"
+            },
+            "BETER_COGNITO_USER_POOL_ID": {
+              "Ref": "UserPool"
+            },
+            "BETER_COGNITO_CLIENT_ID": {
+              "Ref": "UserPoolClient"
+            },
+            "BETER_FUNDING_CUTOFF_AT": {
+              "Ref": "CreditCutoffAt"
             }
           }
         },
@@ -1507,24 +1496,8 @@
             "ALLOWED_ORIGINS": {
               "Ref": "SiteOrigin"
             },
-            "AWS_DATABASE_NAME": "beter",
-            "AWS_DATABASE_RESOURCE_ARN": {
-              "Fn::GetAtt": [
-                "DatabaseCluster",
-                "DBClusterArn"
-              ]
-            },
-            "AWS_DATABASE_SECRET_ARN": {
-              "Ref": "AppDatabaseSecret"
-            },
             "BETER_RUNTIME_SECRET_ARN": {
               "Ref": "RuntimeSecretArn"
-            },
-            "AWS_COGNITO_USER_POOL_ID": {
-              "Ref": "UserPool"
-            },
-            "AWS_COGNITO_CLIENT_ID": {
-              "Ref": "UserPoolClient"
             },
             "BETER_SUPPORT_URL": {
               "Ref": "SupportUrl"
@@ -1535,7 +1508,26 @@
             "BETER_ACCOUNT_DELETION_URL": {
               "Ref": "AccountDeletionUrl"
             },
-            "BETER_AWS_TASK": "process"
+            "BETER_AWS_TASK": "process",
+            "BETER_DATABASE_NAME": "beter",
+            "BETER_DATABASE_RESOURCE_ARN": {
+              "Fn::GetAtt": [
+                "DatabaseCluster",
+                "DBClusterArn"
+              ]
+            },
+            "BETER_DATABASE_SECRET_ARN": {
+              "Ref": "AppDatabaseSecret"
+            },
+            "BETER_COGNITO_USER_POOL_ID": {
+              "Ref": "UserPool"
+            },
+            "BETER_COGNITO_CLIENT_ID": {
+              "Ref": "UserPoolClient"
+            },
+            "BETER_FUNDING_CUTOFF_AT": {
+              "Ref": "CreditCutoffAt"
+            }
           }
         },
         "LoggingConfig": {
@@ -1633,24 +1625,8 @@
             "ALLOWED_ORIGINS": {
               "Ref": "SiteOrigin"
             },
-            "AWS_DATABASE_NAME": "beter",
-            "AWS_DATABASE_RESOURCE_ARN": {
-              "Fn::GetAtt": [
-                "DatabaseCluster",
-                "DBClusterArn"
-              ]
-            },
-            "AWS_DATABASE_SECRET_ARN": {
-              "Ref": "AppDatabaseSecret"
-            },
             "BETER_RUNTIME_SECRET_ARN": {
               "Ref": "RuntimeSecretArn"
-            },
-            "AWS_COGNITO_USER_POOL_ID": {
-              "Ref": "UserPool"
-            },
-            "AWS_COGNITO_CLIENT_ID": {
-              "Ref": "UserPoolClient"
             },
             "BETER_SUPPORT_URL": {
               "Ref": "SupportUrl"
@@ -1661,7 +1637,26 @@
             "BETER_ACCOUNT_DELETION_URL": {
               "Ref": "AccountDeletionUrl"
             },
-            "BETER_AWS_TASK": "monitor"
+            "BETER_AWS_TASK": "monitor",
+            "BETER_DATABASE_NAME": "beter",
+            "BETER_DATABASE_RESOURCE_ARN": {
+              "Fn::GetAtt": [
+                "DatabaseCluster",
+                "DBClusterArn"
+              ]
+            },
+            "BETER_DATABASE_SECRET_ARN": {
+              "Ref": "AppDatabaseSecret"
+            },
+            "BETER_COGNITO_USER_POOL_ID": {
+              "Ref": "UserPool"
+            },
+            "BETER_COGNITO_CLIENT_ID": {
+              "Ref": "UserPoolClient"
+            },
+            "BETER_FUNDING_CUTOFF_AT": {
+              "Ref": "CreditCutoffAt"
+            }
           }
         },
         "LoggingConfig": {

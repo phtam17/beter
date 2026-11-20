@@ -13,6 +13,13 @@ const safeResponse=(statusCode:number,code:string,message:string)=>({statusCode,
 const denied=()=>safeResponse(403,'FORBIDDEN','This endpoint is not available through this connection.');
 const safeIp=(value:unknown):value is string=>typeof value==='string'&&value.length<=64&&/^[0-9a-f:.]+$/i.test(value);
 function matches(left:string,right:string){const a=Buffer.from(left),b=Buffer.from(right);return a.length===b.length&&timingSafeEqual(a,b);}
+function fundingExpired(env:Record<string,string|undefined>){
+  const value=env.BETER_FUNDING_CUTOFF_AT;
+  if(value===undefined)return false;
+  const cutoff=Date.parse(value.endsWith('Z')?value:value+'Z');
+  return !Number.isFinite(cutoff)||Date.now()>=cutoff;
+}
+const fundingRequired=()=>safeResponse(503,'FUNDING_REVIEW_REQUIRED','This environment is paused for a funding review.');
 
 /** The API and scheduled functions are separate IAM targets using the same artifact. */
 export function createAwsHandler({getRuntime,workerTask,onMetric,env=process.env}:Options={}){
@@ -29,6 +36,7 @@ export function createAwsHandler({getRuntime,workerTask,onMetric,env=process.env
     const http=event?.version==='2.0'&&typeof event.requestContext?.http?.method==='string';
     if(!http){
       if(!workerTask||event?.source!=='beter.scheduler'||event.task!==workerTask)return denied();
+      if(fundingExpired(env)){metric({name:workerTask==='process'?'WorkerSuccess':'ReadinessSuccess',value:0});return fundingRequired();}
       try{
         const app=await runtime();
         if(workerTask==='process'){
@@ -47,6 +55,7 @@ export function createAwsHandler({getRuntime,workerTask,onMetric,env=process.env
     const headers=new Headers();
     for(const [name,value]of Object.entries(event.headers||{}))if(typeof value==='string')headers.set(name,value);
     const provided=headers.get('x-beter-origin-secret');if(!provided)return denied();
+    if(fundingExpired(env))return fundingRequired();
     try{
       const app=await runtime();const expected=app.originSecret||app.settings?.originSecret||'';
       if(expected.length<32)return safeResponse(503,'SETUP_REQUIRED','The application connection is not configured.');
@@ -81,6 +90,7 @@ export function createAwsHandler({getRuntime,workerTask,onMetric,env=process.env
 
 /** Cognito's public signup API remains closed alongside the website until launch. */
 export async function preSignupHandler<T extends {request?:{userAttributes?:{email?:string}}}>(event:T,{env=process.env}:{env?:Record<string,string|undefined>}={}){
+  if(fundingExpired(env))throw new Error('Account registration is not open.');
   if(env.BETER_LAUNCH_OPEN==='true')return event;
   const email=event.request?.userAttributes?.email?.trim().toLowerCase();
   const allowed=(env.BETER_TEST_EMAILS||'').split(',').map(value=>value.trim().toLowerCase()).filter(Boolean);
