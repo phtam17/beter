@@ -1,5 +1,15 @@
 # Isolated live provider check: TDD evidence
 
+## Safe provider diagnostics update
+
+RED `8c26d0b`:12 cases executed,6 pass /6 fail because account failures were generic and observed quota disappeared on failure. GREEN `89e9d06`:same12 cases pass; TypeScript passes. The coverage command below now reports **100% lines /92.63% branches /92.86% functions**.
+
+The temporary probe captures only the provider's HTTP status and validated numeric quota headers before the existing adapter processes the response. The task-specified classifications are401=`PROVIDER_KEY_INVALID`,402=`PROVIDER_QUOTA_EXHAUSTED`,403=`PROVIDER_ACCESS_DENIED`,429=`PROVIDER_RATE_LIMITED`; other HTTP errors and network failures remain `PROVIDER_UNAVAILABLE`. HTTP200 malformed payload/normalization errors return `PROVIDER_INVALID_DATA`. No provider response bodies or messages are parsed into diagnostics or returned.
+
+Failures retain a quota object when any valid numeric headers were observed; missing/untrusted values are omitted. Successful checks still require all three quota fields. Quota also survives no-future-market, invalid-data, quota-validation and observed-header timeout paths.
+
+The current [official provider error guide](https://the-odds-api.com/liveapi/guides/v4/api-error-codes.html) distinguishes invalid/deactivated keys from exhausted usage credits and explicitly documents HTTP429 for rate limits. It does not specify every HTTP-status/error-code pairing, so the operator should consider retained quota values alongside the requested classifier. Actual provider/hosted invocation remains the root agent's task; this update made no AWS/provider requests.
+
 Journey: an IAM-authorized temporary AWS function checks real provider egress, normalized future NBA moneylines, and remaining quota without loading application/database credentials or writing financial records. The root agent owns its deployment, invocation and cleanup.
 
 - RED `eea30d5`: `node --test tests/aws-provider-check.test.mjs` executed9 cases,0 pass /9 fail for the missing factory/export.
