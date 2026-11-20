@@ -16,7 +16,7 @@ export async function packageAws({root=projectRoot,outputDir=join(root,'artifact
   if(outputDir===root||root.startsWith(outputDir+sep))throw new Error('Choose a dedicated AWS artifact directory.');
   await mkdir(outputDir,{recursive:true});
   await rm(join(outputDir,'manifest.json'),{force:true});
-  const dist=join(root,'dist'),assets=[];
+  const dist=join(root,'dist'),assets=[],publicAssets={};
   async function inspect(directory){
     for(const entry of (await readdir(directory,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))){
       if(entry.name==='.DS_Store')continue;
@@ -26,7 +26,9 @@ export async function packageAws({root=projectRoot,outputDir=join(root,'artifact
       const contentType=contentTypes[extname(entry.name).toLowerCase()];
       if(!entry.isFile()||!contentType)throw new Error('Unsupported public asset type; review the static upload manifest.');
       const bytes=await readFile(sourcePath);
-      assets.push({key:relative(dist,sourcePath).split(sep).join('/'),sourcePath,sha256:hash(bytes),bytes:bytes.length,contentType,cacheControl:'no-cache'});
+      const key=relative(dist,sourcePath).split(sep).join('/');
+      assets.push({key,sourcePath,sha256:hash(bytes),bytes:bytes.length,contentType,cacheControl:'no-cache'});
+      publicAssets['/'+key]={body:bytes.toString('base64'),contentType,isBase64Encoded:true};
     }
   }
   await inspect(dist);
@@ -36,7 +38,7 @@ export async function packageAws({root=projectRoot,outputDir=join(root,'artifact
   const directory=join(outputDir,'lambda');await mkdir(directory,{recursive:true});const entry=join(directory,'index.mjs');
   let result;
   try{
-    result=await buildImpl({entryPoints:[join(root,'aws/handler.ts')],outfile:entry,absWorkingDir:root,bundle:true,platform:'node',target:'node24',format:'esm',metafile:true,sourcemap:false,minify:false,logLevel:'silent',banner:{js:"import {createRequire as __beterCreateRequire} from 'node:module'; const require = __beterCreateRequire(import.meta.url);"}});
+    result=await buildImpl({stdin:{contents:"export * from './aws/handler.ts'; export * from './aws/web-handler.ts';",resolveDir:root,sourcefile:'aws-entry.ts',loader:'ts'},plugins:[{name:'reviewed-public-assets',setup(plugin){plugin.onResolve({filter:/^beter:public-assets$/},()=>({path:'beter:public-assets',namespace:'beter-public'}));plugin.onLoad({filter:/.*/,namespace:'beter-public'},()=>({contents:'export const assets = '+JSON.stringify(publicAssets)+';',loader:'js'}));}}],outfile:entry,absWorkingDir:root,bundle:true,platform:'node',target:'node24',format:'esm',metafile:true,sourcemap:false,minify:false,logLevel:'silent',banner:{js:"import {createRequire as __beterCreateRequire} from 'node:module'; const require = __beterCreateRequire(import.meta.url);"}});
   }catch{throw new Error('The AWS runtime bundle could not be built. Check the reviewed runtime source and installed dependencies.');}
   if(!result?.metafile||Object.keys(result.metafile.inputs).some(name=>/pglite|(?:^|\/)server\/local\.ts$/.test(name)))throw new Error('The local database runtime must not enter an AWS deployment artifact.');
   await utimes(entry,new Date('2000-01-01T00:00:00Z'),new Date('2000-01-01T00:00:00Z'));
