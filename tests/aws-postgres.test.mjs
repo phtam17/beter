@@ -20,5 +20,5 @@ test('insecure direct connections require an explicit loopback-only exemption an
   const db=implementation.createPostgresDatabase({connectionString:'postgresql://u:p@127.0.0.1/beter',allowLocalInsecure:true});assert.equal(typeof db.query,'function');
 });
 test('direct PostgreSQL validates parameters and serializes JSON arrays instead of PostgreSQL arrays',async()=>{
-  assert.equal(typeof implementation.createPostgresDatabase,'function');const {pool,calls}=fixture();const db=implementation.createPostgresDatabase({pool});await db.query('select :items,:missing',{items:['one'],missing:null});assert.deepEqual(calls[0].values,['["one"]',null]);await assert.rejects(()=>db.query('select :n',{n:Number.MAX_SAFE_INTEGER+1}),/parameter/i);await assert.rejects(()=>db.query('select :missing'),/parameter/i);
+  assert.equal(typeof implementation.createPostgresDatabase,'function');const {pool,calls}=fixture();const db=implementation.createPostgresDatabase({pool});await db.query('select :items,:missing',{items:['one'],missing:null});assert.deepEqual(calls[0].values,['["one"]',null]);await assert.rejects(()=>db.query('select :n',{n:Number.MAX_SAFE_INTEGER+1}),/parameter/i);await assert.rejects(()=>db.query('select :missing'),/parameter/i);await db.close();assert.equal(calls.at(-1).sql,'end');
 });
