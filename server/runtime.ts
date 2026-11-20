@@ -5,6 +5,7 @@ import {createOddsProvider,createSampleProvider,type OddsProvider} from './provi
 import {runBackgroundJobs} from './jobs.ts';
 import {createAuthLimiter} from './abuse.ts';
 export async function createRuntime({env={},backend:injectedBackend,provider:injectedProvider}:{env?:Record<string,string|undefined>;backend?:Backend;provider?:OddsProvider}={}){
+  if(env.BETER_BACKEND==='aws'){const {createAwsRuntime}=await import('./aws-runtime.ts');return createAwsRuntime({env,provider:injectedProvider});}
   const settings=readSettings(env);
   if(settings.mode==='local'&&!settings.sessionSecret){
     const {mkdir,readFile,writeFile}=await import('node:fs/promises');
