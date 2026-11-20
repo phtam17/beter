@@ -1,0 +1,30 @@
+{
+  "name": "beter-practice",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node serve.mjs",
+    "dev": "node serve.mjs",
+    "test": "node --test --test-concurrency=1 tests/*.test.mjs",
+    "test:coverage": "node --test --test-concurrency=1 --experimental-test-coverage --test-coverage-include='server/*.ts' --test-coverage-include='dist/api-client.js' --test-coverage-include='dist/engine.js' --test-coverage-include='dist/markets.js' --test-coverage-lines=80 --test-coverage-branches=80 --test-coverage-functions=80 tests/*.test.mjs",
+    "test:e2e": "playwright test",
+    "test:install-browsers": "playwright install chromium firefox webkit",
+    "test:postgres": "node --test tests/postgres-race.integration.mjs",
+    "ops": "node scripts/ops.mjs",
+    "typecheck": "node scripts/build-edge.mjs && tsc --noEmit",
+    "build": "npm run typecheck"
+  },
+  "engines": { "node": ">=22.18.0" },
+  "packageManager": "npm@11.17.0",
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.17"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.1",
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "pg": "^8.23.1",
+    "typescript": "^7.0.2"
+  }
+}

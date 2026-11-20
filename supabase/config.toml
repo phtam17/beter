@@ -1,0 +1,7 @@
+project_id = "beter"
+
+[functions.beter]
+# Every user request is verified by server/api.ts using Supabase Auth getUser.
+# Scheduled requests require the separate JOB_SECRET. No browser bypass exists.
+verify_jwt = false
+entrypoint = "./functions/beter/index.ts"

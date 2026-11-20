@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#f8f9fc">
+  <meta name="description" content="Practice sports betting with a virtual bankroll. Explore sample markets, test your strategy, and understand your performance with Beter.">
+  <title>Beter | Your practice, in play.</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600&family=Barlow+Condensed:wght@800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./tokens.css">
+  <link rel="stylesheet" href="./base.css">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="wordmark" href="#overview" aria-label="Beter home"><span class="brand-mark" aria-hidden="true">b</span>beter<span class="wordmark-period">.</span></a>
+      <nav class="main-nav" aria-label="Main navigation">
+        <a href="#overview" data-route="overview">Overview</a>
+        <a href="#sportsbook" data-route="sportsbook">Sportsbook</a>
+        <a href="#bets" data-route="bets">My bets <span id="nav-bet-count" class="nav-count" hidden></span></a>
+        <a href="#learn" data-route="learn">Learn</a>
+      </nav>
+      <div class="header-account"><span class="practice-badge"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 4v5c0 5-8 9-8 9s-8-4-8-9V7z"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg>Virtual funds only</span><button type="button" class="button secondary account-button" id="account-button">Sign in</button><button type="button" class="avatar" id="settings-button" aria-label="Open practice settings">Settings</button></div>
+    </div>
+  </header>
+  <main id="main" class="app-container" tabindex="-1">
+    <section id="signout-notice" class="connection-notice signout-notice" role="alert" aria-labelledby="signout-title" hidden><h2 id="signout-title">Sign-out is unfinished</h2><p id="signout-description"></p><button type="button" class="button secondary" id="retry-signout">Retry sign-out</button></section>
+    <div id="page-content"><div class="loading-state" role="status">Getting your practice room ready…</div></div>
+    <noscript><p>Enable JavaScript to use your virtual bankroll and place practice bets. Beter uses sample markets and never accepts real money.</p></noscript>
+  </main>
+  <footer class="site-footer app-container"><span class="footer-brand">A little practice. A better perspective.</span><span>Virtual funds only <span class="footer-separator">/</span> <span id="footer-feed-label">Sample odds, no real wagers</span></span><div class="footer-actions"><button type="button" class="text-button" id="footer-help">Help and data</button><button type="button" class="text-button" id="footer-reset">Practice settings</button></div></footer>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <dialog id="settings-dialog" aria-labelledby="settings-title">
+    <form method="dialog" class="dialog-top"><span class="dialog-symbol" id="settings-symbol"></span><button type="submit" class="icon-button" aria-label="Close settings">×</button></form>
+    <h2 id="settings-title">Your practice, your pace.</h2>
+    <p class="dialog-description">Your portfolio is saved in this browser. Start with a clean $10,000 virtual bankroll, or explore the sample portfolio.</p>
+    <div class="setting-option"><div><h3>Start fresh</h3><p>Clear your bets and begin at $10,000.</p></div><button type="button" class="button secondary" id="reset-button">Start fresh</button></div>
+    <div class="setting-option"><div><h3>Sample portfolio</h3><p>Preview illustrative results without changing your practice.</p></div><button type="button" class="button secondary" id="demo-button">View sample</button></div>
+    <div id="reset-confirmation" class="confirmation" hidden><p id="confirmation-copy">This will replace the portfolio saved in this browser.</p><div class="button-row"><button type="button" class="button primary" id="confirm-reset">Replace portfolio</button><button type="button" class="button secondary" id="cancel-reset">Cancel</button></div></div>
+    <p class="dialog-note">Practice outcomes are manually simulated. Markets and odds are illustrative.</p>
+  </dialog>
+  <dialog id="auth-dialog" aria-labelledby="auth-title"></dialog>
+  <dialog id="help-dialog" aria-labelledby="help-title"><form method="dialog" class="dialog-top"><span></span><button type="submit" class="icon-button" aria-label="Close help and data">×</button></form><h2 id="help-title" tabindex="-1">Help and data</h2><div id="help-content"></div></dialog>
+</body>
+</html>

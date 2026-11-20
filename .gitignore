@@ -1,0 +1,15 @@
+node_modules/
+.DS_Store
+.hallmark/
+.impeccable/
+artifacts/
+.data/
+.env
+.env.local
+.env.*.local
+.env.*
+!.env.example
+supabase/.temp/
+supabase/functions/_shared/
+test-results/
+playwright-report/
