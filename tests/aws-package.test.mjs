@@ -19,4 +19,16 @@ test('AWS bundle cannot silently include the local database runtime',async t=>{
 });
 test('missing assets and build failures leave no success manifest',async t=>{
   assert.equal(typeof packageAws,'function');const root=await fixture(t);await rm(join(root,'dist/index.html'));await assert.rejects(()=>packageAws({root}),/index.html/);await assert.rejects(()=>readFile(join(root,'artifacts/aws/manifest.json')),/ENOENT/);
+  await writeFile(join(root,'dist/index.html'),'<html>Restored</html>');await mkdir(join(root,'artifacts/aws'),{recursive:true});await writeFile(join(root,'artifacts/aws/manifest.json'),'stale success');
+  await assert.rejects(()=>packageAws({root,buildImpl:async()=>{throw new Error('PRIVATE_BUILD_VALUE');}}),error=>/could not be built/.test(error.message)&&!error.message.includes('PRIVATE_BUILD_VALUE'));await assert.rejects(()=>readFile(join(root,'artifacts/aws/manifest.json')),/ENOENT/);
+});
+
+test('packaging keeps nested public paths, ignores Finder metadata, and rejects unreviewed file types',async t=>{
+  const root=await fixture(t);await mkdir(join(root,'dist/assets'));await writeFile(join(root,'dist/assets/icon.svg'),'<svg/>');await writeFile(join(root,'dist/.DS_Store'),'metadata');const manifest=await packageAws({root});assert.ok(manifest.assets.some(asset=>asset.key==='assets/icon.svg'&&asset.contentType==='image/svg+xml'));assert.equal(manifest.assets.some(asset=>asset.key.includes('DS_Store')),false);
+  await writeFile(join(root,'dist/database.sql'),'private');await assert.rejects(()=>packageAws({root}),/Unsupported public asset/);
+});
+test('artifact generation rejects unsafe destinations, oversized templates, and unverifiable bundles',async t=>{
+  const root=await fixture(t);await assert.rejects(()=>packageAws({root,outputDir:root}),/dedicated AWS artifact/);
+  await writeFile(join(root,'infra/aws/template.json'),JSON.stringify({Description:'x'.repeat(51201)}));await assert.rejects(()=>packageAws({root}),/direct CloudFormation limit/);
+  await writeFile(join(root,'infra/aws/template.json'),'{}');await assert.rejects(()=>packageAws({root,buildImpl:async()=>({})}),/local database runtime/);
 });
