@@ -81,7 +81,7 @@ export function createApiClient(options={}) {
       const payload=await request(path,{method:'POST',body:{email,password},signal:controller.signal});
       if(generation!==authGeneration)throw aborted();
       if(payload.session){activeSession=normalizeSession(payload.session,payload.user);if(!activeSession)throw new ApiError('Beter returned an invalid account session.',{code:'INVALID_RESPONSE'});}
-      return {session:payload.session?structuredClone(activeSession):null,...(payload.user?{user:activeSession?.user??{id:payload.user.id,...(typeof payload.user.email==='string'?{email:payload.user.email}:{})}}:{}),...(payload.requiresConfirmation?{requiresConfirmation:true}:{})};
+      return {session:payload.session?structuredClone(activeSession):null,...(payload.user?{user:activeSession?.user??{id:payload.user.id,...(typeof payload.user.email==='string'?{email:payload.user.email}:{})}}:{}),...(payload.requiresConfirmation?{requiresConfirmation:true}:{}),...(payload.confirmationMethod==='code'?{confirmationMethod:'code'}:{})};
     }finally{if(generation===authGeneration)authController=null;}
   }
   async function recoveryRequest(path,body) {
@@ -114,6 +114,8 @@ export function createApiClient(options={}) {
     signout,
     recover:email=>recoveryRequest('/auth/recover',{email}),
     confirmRecovery:(email,code,password)=>recoveryRequest('/auth/confirm',{email,code,password}),
+    verifySignup:(email,code)=>recoveryRequest('/auth/verify',{email,code}),
+    resendSignupConfirmation:email=>recoveryRequest('/auth/resend',{email}),
     updatePassword:(password,accessToken)=>request('/auth/password',{method:'POST',body:{password},authenticated:accessToken===undefined,accessToken}),
     portfolio:()=>request('/portfolio',{authenticated:true}),
     async history(portfolioId,{before=null,limit=100,status=null,signal}={}){

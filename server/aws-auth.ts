@@ -1,6 +1,6 @@
 import {
-  CognitoIdentityProviderClient,ConfirmForgotPasswordCommand,ForgotPasswordCommand,
-  GetUserCommand,GlobalSignOutCommand,InitiateAuthCommand,RevokeTokenCommand,SignUpCommand,
+  CognitoIdentityProviderClient,ConfirmForgotPasswordCommand,ConfirmSignUpCommand,ForgotPasswordCommand,
+  GetUserCommand,GlobalSignOutCommand,InitiateAuthCommand,ResendConfirmationCodeCommand,RevokeTokenCommand,SignUpCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
 import {ApiFault} from './api.ts';
 
@@ -37,7 +37,7 @@ function safeError(error:unknown):ApiFault{
   if(error instanceof ApiFault)return error;
   const name=(error as {name?:unknown})?.name;
   if(name==='TooManyRequestsException'||name==='LimitExceededException')return new ApiFault(429,'RATE_LIMITED','Too many attempts. Please wait before trying again.');
-  if(name==='CodeMismatchException'||name==='ExpiredCodeException')return new ApiFault(400,'INVALID_CODE','The recovery code is invalid or expired. Request a new code and try again.');
+  if(name==='CodeMismatchException'||name==='ExpiredCodeException')return new ApiFault(400,'INVALID_CODE','The verification code is invalid or expired. Request a new code and try again.');
   if(name==='InvalidPasswordException'||name==='PasswordHistoryPolicyViolationException')return new ApiFault(400,'INVALID_PASSWORD','Choose a different password that meets the account requirements.');
   if(['NotAuthorizedException','UnauthorizedException','UserNotFoundException','UserNotConfirmedException','PasswordResetRequiredException'].includes(String(name)))return authFailed();
   return unavailable();
@@ -144,6 +144,15 @@ export function createCognitoAuthBackend({region,clientId,store,secret,client,no
         return publicResult(access,refresh,next,user);
       }
       const email=emailAddress(body.email);
+      if(action==='verify'){
+        if(typeof body.code!=='string'||!/^\d{6}$/.test(body.code))throw new ApiFault(400,'INVALID_CODE','Enter the six-digit verification code.');
+        await invoke(new ConfirmSignUpCommand({ClientId:clientId,Username:email,ConfirmationCode:body.code,ForceAliasCreation:false}),deadline);
+        return{ok:true};
+      }
+      if(action==='resend'){
+        try{await invoke(new ResendConfirmationCodeCommand({ClientId:clientId,Username:email}),deadline);}catch(error){if(!['UserNotFoundException','InvalidParameterException','NotAuthorizedException'].includes(String((error as {name?:unknown})?.name)))throw error;}
+        return{message:'If this account is waiting for confirmation, check your email for a verification code.'};
+      }
       if(action==='recover'){
         try{await invoke(new ForgotPasswordCommand({ClientId:clientId,Username:email}),deadline);}catch(error){if(!['UserNotFoundException','InvalidParameterException'].includes(String((error as {name?:unknown})?.name)))throw error;}
         return{requiresCode:true,message:'If this account exists and is confirmed, check your email for a recovery code.'};
@@ -172,7 +181,7 @@ export function createCognitoAuthBackend({region,clientId,store,secret,client,no
           if(name==='UserLambdaValidationException')throw new ApiFault(403,'SIGNUP_UNAVAILABLE','Account registration is not available. Contact support or try again later.');
           if(name!=='UsernameExistsException')throw error;
         }
-        return{session:null,requiresConfirmation:true};
+        return{session:null,requiresConfirmation:true,confirmationMethod:'code'};
       }
       if(action!=='signin')throw new ApiFault(400,'INVALID_AUTH_ACTION','Choose a valid account action.');
       const provider=resultTokens(await invoke(new InitiateAuthCommand({AuthFlow:'USER_PASSWORD_AUTH',ClientId:clientId,AuthParameters:{USERNAME:email,PASSWORD:password(body.password)}}),deadline));

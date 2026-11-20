@@ -6,7 +6,7 @@ export function createAuthLimiter({backend,secret,trustProxy=false}:Options){
   const key=crypto.subtle.importKey('raw',new TextEncoder().encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
   const hash=async(value:string)=>Array.from(new Uint8Array(await crypto.subtle.sign('HMAC',await key,new TextEncoder().encode(value))),byte=>byte.toString(16).padStart(2,'0')).join('');
   return async(request:Request,action:string,email:string)=>{
-    const buckets=[{kind:'global',key:await hash('global:auth')},{kind:action==='recover'?'recovery':'identity',key:await hash('identity:'+email.trim().toLowerCase())}];
+    const buckets=[{kind:'global',key:await hash('global:auth')},{kind:['recover','resend'].includes(action)?'recovery':'identity',key:await hash('identity:'+email.trim().toLowerCase())}];
     // AWS entry verifies the origin secret and replaces the private source header.
     // Vercel overwrites its own forwarding header; direct hosts trust neither.
     const source=trustProxy==='aws'?request.headers.get('x-beter-source-ip'):trustProxy===true?request.headers.get('x-forwarded-for')?.split(',')[0].trim():null;
