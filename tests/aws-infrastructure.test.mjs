@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {runInNewContext} from 'node:vm';
+import {createRequire} from 'node:module';
+const require=createRequire(import.meta.url);
 const template=await readFile(new URL('../infra/aws/template.json',import.meta.url),'utf8').then(JSON.parse).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
 const resource=name=>{assert.ok(template,'A deployable AWS infrastructure template must exist.');assert.ok(template.Resources[name],`Missing infrastructure component: ${name}`);return template.Resources[name];};
 test('AWS staging starts closed, with separate user and origin gates',()=>{
@@ -23,4 +27,17 @@ test('scheduling waits for migrations, has scoped invoke rights, and readiness/f
 });
 test('managed resources require reviewed credits and keep the ten-dollar net-cash alert ceiling explicit',()=>{
   resource('DatabaseCluster');assert.equal(template.Parameters.CreditsVerified.Default,'false');assert.equal(template.Parameters.MonthlyCashCeilingUsd.Default,10);assert.ok(template.Rules.VerifiedFunding);assert.equal(resource('CashBudget').Properties.Budget.CostTypes.IncludeCredit,true);assert.equal(resource('CashBudget').Properties.Budget.BudgetLimit.Amount.Ref,'MonthlyCashCeilingUsd');assert.ok(template.Rules.PublicLaunchChecks);
+});
+function edge(overrides={}){
+  const value='Basic '+Buffer.from('tester:a-long-private-staging-password').toString('base64');
+  const code=resource('StagingGate').Properties.FunctionCode['Fn::Sub'].replaceAll('${CreditCutoffAt}',overrides.cutoff||'2099-01-01T00:00:00').replaceAll('${LaunchOpen}',overrides.open?'true':'false').replaceAll('${StagingAuthorizationHash}',createHash('sha256').update(value).digest('hex'));
+  return{value,handler:runInNewContext(code+'\nhandler;',{require})};
+}
+test('edge gate hashes browser/machine access and strips gate credentials before origin',()=>{
+  const {handler,value}=edge();assert.equal(handler({viewer:{ip:'203.0.113.2'},request:{headers:{}}}).statusCode,401);
+  const browser=handler({viewer:{ip:'203.0.113.2'},request:{headers:{authorization:{value},'x-beter-viewer-ip':{value:'forged'}}}});assert.equal(browser.headers.authorization,undefined);assert.equal(browser.headers['x-beter-viewer-ip'].value,'203.0.113.2');
+  const machine=handler({viewer:{ip:'203.0.113.2'},request:{headers:{authorization:{value:'Bearer worker'},'x-beter-staging-access':{value}}}});assert.equal(machine.headers.authorization.value,'Bearer worker');assert.equal(machine.headers['x-beter-staging-access'],undefined);
+});
+test('edge funding cutoff overrides public launch and never reaches an origin',()=>{
+  for(const cutoff of ['2000-01-01T00:00:00','invalid']){const {handler}=edge({open:true,cutoff});const response=handler({viewer:{ip:'203.0.113.2'},request:{headers:{}}});assert.equal(response.statusCode,503);assert.match(response.body,/funding review/);}
 });

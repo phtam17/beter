@@ -47,3 +47,15 @@ test('Cognito staging signup is default denied and only normalized allowlisted a
   const event=request(' Tester@Example.Test ');assert.equal(await preSignupHandler(event,{env:{BETER_LAUNCH_OPEN:'false',BETER_TEST_EMAILS:'tester@example.test,other@example.test'}}),event);await assert.rejects(()=>preSignupHandler(request('outsider@example.test'),{env:{BETER_TEST_EMAILS:'tester@example.test'}}),/not open/i);
   assert.equal((await preSignupHandler(request('anyone@example.test'),{env:{BETER_LAUNCH_OPEN:'true'}})).request.userAttributes.email,'anyone@example.test');
 });
+test('verified proxy identity overwrites a spoofed source address',async()=>{
+  const {handle,requests}=fixture();await handle(event({headers:{'x-beter-origin-secret':secret,'x-beter-viewer-ip':'198.51.100.7','x-beter-source-ip':'attacker','x-forwarded-for':'attacker'}}));assert.equal(requests[0].headers.get('x-beter-source-ip'),'198.51.100.7');assert.equal(requests[0].headers.get('x-beter-viewer-ip'),null);assert.equal(requests[0].headers.get('x-forwarded-for'),null);
+});
+test('funding cutoff stops API and scheduled work before secret or database loading',async()=>{
+  let loads=0;for(const workerTask of [undefined,'process','monitor']){
+    const invoke=fixture({workerTask,env:{BETER_FUNDING_CUTOFF_AT:'2000-01-01T00:00:00'},getRuntime:async()=>{loads++;throw new Error('should not load');}});
+    const response=await invoke.handle(workerTask?{source:'beter.scheduler',task:workerTask}:event());assert.equal(response.statusCode,503);assert.equal(JSON.stringify(response).includes('FUNDING_REVIEW_REQUIRED'),true);
+  }assert.equal(loads,0);
+});
+test('Cognito registration cannot outlive the funding cutoff even after launch',async()=>{
+  const event={request:{userAttributes:{email:'tester@example.test'}}};for(const value of ['2000-01-01T00:00:00','invalid'])await assert.rejects(()=>preSignupHandler(event,{env:{BETER_LAUNCH_OPEN:'true',BETER_FUNDING_CUTOFF_AT:value}}),/not open/i);
+});
