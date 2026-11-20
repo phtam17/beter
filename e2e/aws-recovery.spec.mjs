@@ -1,0 +1,107 @@
+import {test,expect} from '@playwright/test';
+
+test.use({viewport:{width:375,height:812}});
+const email='recovery@example.test',password='a-new-recovery-password';
+async function mockRecovery(page,{confirmError=null,delayConfirm=false,delayRecover=false,legacy=false}={}){
+  const calls=[];let releaseConfirm,releaseRecover;
+  await page.route('**/api/**',async route=>{
+    const path=new URL(route.request().url()).pathname;
+    const body=route.request().postData()?route.request().postDataJSON():undefined;
+    calls.push({path,body});
+    const respond=(value,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(value)}).catch(()=>{});
+    if(path==='/api/config')return respond({mode:'supabase',dataMode:'sample',authProvider:'cognito',liveOddsConfigured:false});
+    if(path==='/api/auth/session')return respond({session:null});
+    if(path==='/api/auth/recover'){
+      const finish=()=>respond(legacy?{message:'Check your email for a recovery link.'}:{requiresCode:true,message:'If this account exists and is confirmed, check your email for a recovery code.'});
+      if(delayRecover){releaseRecover=finish;return;}
+      return finish();
+    }
+    if(path==='/api/auth/confirm'){
+      const finish=()=>confirmError?respond({error:confirmError},400):respond({ok:true});
+      if(delayConfirm){releaseConfirm=finish;return;}
+      return finish();
+    }
+    if(path==='/api/auth/password'||path==='/api/auth/signout')return respond({ok:true});
+    return respond({error:{code:'NOT_FOUND',message:'Unknown route'}},404);
+  });
+  return {calls,releaseConfirm:()=>releaseConfirm?.(),releaseRecover:()=>releaseRecover?.()};
+}
+async function requestCode(page){
+  await page.goto('/');await page.getByRole('button',{name:'Sign in',exact:true}).click();
+  await page.getByRole('button',{name:'Forgot password?',exact:true}).click();
+  await page.getByLabel('Email address',{exact:true}).fill(email);
+  await page.getByRole('button',{name:'Send recovery email',exact:true}).click();
+}
+async function enterConfirmation(page,code='012345'){
+  await page.getByLabel('Verification code',{exact:true}).fill(code);
+  await page.getByLabel('New password',{exact:true}).fill(password);
+}
+
+test('email code recovery fits a narrow screen, accepts paste and leading zero, and returns to sign-in without storing secrets',async({page})=>{
+  const {calls}=await mockRecovery(page);await requestCode(page);
+  const dialog=page.getByRole('dialog',{name:'Reset your password',exact:true}),code=page.getByLabel('Verification code',{exact:true});
+  await expect(dialog).toBeVisible();await expect(code).toBeFocused();
+  await expect(page.getByLabel('Email address',{exact:true})).toHaveValue(email);
+  for(const [attribute,value] of Object.entries({type:'text',inputmode:'numeric',autocomplete:'one-time-code',pattern:'[0-9]{6}'}))await expect(code).toHaveAttribute(attribute,value);
+  await expect(page.getByLabel('New password',{exact:true})).toHaveAttribute('autocomplete','new-password');
+  await expect(dialog).toContainText('Enter the 6-digit code from your email');
+  expect(await dialog.evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);
+  await enterConfirmation(page);await page.getByRole('button',{name:'Update password',exact:true}).click();
+  await expect(page.getByRole('dialog',{name:'Sign in to Beter',exact:true})).toContainText('Your password has been updated. Sign in with your new password.');
+  expect(calls.find(call=>call.path==='/api/auth/confirm').body).toEqual({email,code:'012345',password});
+  expect(calls.filter(call=>call.path==='/api/auth/signin')).toHaveLength(0);
+  await expect(page.getByLabel('Password',{exact:true})).toHaveValue('');
+  const stored=await page.evaluate(()=>JSON.stringify({local:{...localStorage},session:{...sessionStorage},url:location.href}));
+  expect(stored).not.toContain('012345');expect(stored).not.toContain(password);
+});
+
+test('code constraints stop malformed submission and an invalid code offers recovery without retaining secrets',async({page})=>{
+  const {calls}=await mockRecovery(page,{confirmError:{code:'INVALID_CODE',message:'That recovery code is invalid or has expired. Request a new code.'}});await requestCode(page);
+  await enterConfirmation(page,'12345');await page.getByRole('button',{name:'Update password',exact:true}).click();
+  expect(calls.filter(call=>call.path==='/api/auth/confirm')).toHaveLength(0);
+  await expect(page.getByLabel('Verification code',{exact:true})).toBeFocused();
+  await page.getByLabel('Verification code',{exact:true}).fill('012345');await page.getByRole('button',{name:'Update password',exact:true}).click();
+  await expect(page.getByRole('alert')).toContainText('That recovery code is invalid or has expired. Request a new code.');
+  await expect(page.getByLabel('Verification code',{exact:true})).toHaveValue('');
+  await expect(page.getByLabel('New password',{exact:true})).toHaveValue('');
+  await expect(page.getByLabel('Email address',{exact:true})).toHaveValue(email);
+  await page.getByRole('button',{name:'Resend code',exact:true}).click();
+  await expect(page.getByRole('status').filter({hasText:'check your email for a recovery code'})).toBeVisible();
+  expect(calls.filter(call=>call.path==='/api/auth/recover')).toHaveLength(2);
+});
+
+test('a delayed confirmation cannot replace a different account screen',async({page})=>{
+  const api=await mockRecovery(page,{delayConfirm:true});await requestCode(page);await enterConfirmation(page);
+  await page.getByRole('button',{name:'Update password',exact:true}).click();
+  await expect.poll(()=>api.calls.filter(call=>call.path==='/api/auth/confirm').length).toBe(1);
+  await expect(page.getByRole('button',{name:'Please wait…',exact:true})).toBeDisabled();
+  await page.getByRole('button',{name:'Back to sign in',exact:true}).click();await api.releaseConfirm();
+  await expect(page.getByRole('dialog',{name:'Sign in to Beter',exact:true})).toBeVisible();
+  await expect(page.getByText('Your password has been updated. Sign in with your new password.',{exact:true})).toHaveCount(0);
+  await expect(page.getByLabel('Password',{exact:true})).toHaveValue('');
+});
+
+test('closing a delayed recovery request does not reopen or advance the account dialog',async({page})=>{
+  const api=await mockRecovery(page,{delayRecover:true});await requestCode(page);
+  await page.getByRole('button',{name:'Close account dialog',exact:true}).click();await api.releaseRecover();
+  await expect(page.locator('#auth-dialog')).not.toBeVisible();
+  await page.getByRole('button',{name:'Sign in',exact:true}).click();
+  await expect(page.getByRole('dialog',{name:'Sign in to Beter',exact:true})).toBeVisible();
+  await expect(page.getByLabel('Verification code',{exact:true})).toHaveCount(0);
+});
+
+test('email can be corrected and Supabase link-based recovery remains available',async({page})=>{
+  const api=await mockRecovery(page);await requestCode(page);
+  await page.getByRole('button',{name:'Change email',exact:true}).click();
+  await expect(page.getByLabel('Email address',{exact:true})).toHaveValue(email);
+  await page.getByLabel('Email address',{exact:true}).fill('corrected@example.test');
+  await page.getByRole('button',{name:'Send recovery email',exact:true}).click();
+  await expect(page.getByLabel('Email address',{exact:true})).toHaveValue('corrected@example.test');
+  expect(api.calls.filter(call=>call.path==='/api/auth/recover').at(-1).body.email).toBe('corrected@example.test');
+  await page.goto('/?legacy-recovery=1#access_token=legacy-recovery-token&type=recovery');
+  await expect(page.getByRole('dialog',{name:'Choose a new password',exact:true})).toBeVisible();
+  await expect(page).not.toHaveURL(/legacy-recovery-token/);
+  await page.getByLabel('New password',{exact:true}).fill(password);
+  await page.getByRole('button',{name:'Update password',exact:true}).click();
+  await expect(page.getByText('Your password has been updated. Sign in with your new password.',{exact:true})).toBeVisible();
+});
