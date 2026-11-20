@@ -488,6 +488,14 @@
         },
         "true"
       ]
+    },
+    "IsSampleData": {
+      "Fn::Equals": [
+        {
+          "Ref": "DataMode"
+        },
+        "sample"
+      ]
     }
   },
   "Resources": {
@@ -1518,10 +1526,26 @@
               "Ref": "LaunchOpen"
             },
             "BETER_SAMPLE_START_AT": {
-              "Ref": "SampleStartAt"
+              "Fn::If": [
+                "IsSampleData",
+                {
+                  "Ref": "SampleStartAt"
+                },
+                {
+                  "Ref": "AWS::NoValue"
+                }
+              ]
             },
             "BETER_SAMPLE_DURATION_SECONDS": {
-              "Ref": "SampleDurationSeconds"
+              "Fn::If": [
+                "IsSampleData",
+                {
+                  "Ref": "SampleDurationSeconds"
+                },
+                {
+                  "Ref": "AWS::NoValue"
+                }
+              ]
             }
           }
         },
@@ -1643,10 +1667,26 @@
               "Ref": "CreditCutoffAt"
             },
             "BETER_SAMPLE_START_AT": {
-              "Ref": "SampleStartAt"
+              "Fn::If": [
+                "IsSampleData",
+                {
+                  "Ref": "SampleStartAt"
+                },
+                {
+                  "Ref": "AWS::NoValue"
+                }
+              ]
             },
             "BETER_SAMPLE_DURATION_SECONDS": {
-              "Ref": "SampleDurationSeconds"
+              "Fn::If": [
+                "IsSampleData",
+                {
+                  "Ref": "SampleDurationSeconds"
+                },
+                {
+                  "Ref": "AWS::NoValue"
+                }
+              ]
             }
           }
         },
@@ -1786,10 +1826,26 @@
               "Ref": "CreditCutoffAt"
             },
             "BETER_SAMPLE_START_AT": {
-              "Ref": "SampleStartAt"
+              "Fn::If": [
+                "IsSampleData",
+                {
+                  "Ref": "SampleStartAt"
+                },
+                {
+                  "Ref": "AWS::NoValue"
+                }
+              ]
             },
             "BETER_SAMPLE_DURATION_SECONDS": {
-              "Ref": "SampleDurationSeconds"
+              "Fn::If": [
+                "IsSampleData",
+                {
+                  "Ref": "SampleDurationSeconds"
+                },
+                {
+                  "Ref": "AWS::NoValue"
+                }
+              ]
             }
           }
         },
