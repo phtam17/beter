@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {validateHostedState,readHostedState,runHostedDatabaseChecks} from './aws-hosted-database.integration.mjs';
+import * as hosted from './aws-hosted-database.integration.mjs';
+const {validateHostedState,readHostedState,runHostedDatabaseChecks}=hosted;
 const future=new Date(Date.now()+86400000).toISOString().slice(0,19);
 const state=()=>({accountId:'123456789012',region:'us-west-2',stackName:'beter-staging',launchOpen:false,schedules:'DISABLED',cutoffAt:future,parameters:{Environment:'staging',LaunchOpen:'false',ScheduleState:'DISABLED',DataMode:'sample'},outputs:{LaunchOpen:'false',DatabaseClusterArn:'arn:aws:rds:us-west-2:123456789012:cluster:beter',DatabaseName:'beter',DatabaseAppSecretArn:'arn:aws:secretsmanager:us-west-2:123456789012:secret:app',DatabaseMasterSecretArn:'arn:aws:secretsmanager:us-west-2:123456789012:secret:master'},runtime:{sessionSecret:'private-do-not-return'}});
 test('hosted database checks refuse an absent explicit flag before reading files or contacting AWS',async()=>{
@@ -26,4 +27,10 @@ test('hosted checks revalidate actual account and stack before Data API calls an
     const control={async call(service){if(service==='sts')return{Account:mismatch==='account'?'234567890123':'123456789012'};return{Stacks:[{StackName:'beter-staging',StackStatus:'CREATE_COMPLETE',Parameters:Object.entries({...target.parameters,LaunchOpen:'true'}).map(([ParameterKey,ParameterValue])=>({ParameterKey,ParameterValue})),Outputs:Object.entries(target.outputs).map(([OutputKey,OutputValue])=>({OutputKey,OutputValue}))}]};}};
     await assert.rejects(()=>runHostedDatabaseChecks(null,{state:target,config,client,control}),/HOSTED_CHECKS_/);assert.equal(sends,0);assert.equal(destroyed,1);
   }
+});
+test('hosted fixture cleanup reports its fixed failure code while preserving the original check failure',async()=>{
+  assert.equal(typeof hosted.finalizeHostedChecks,'function');const original=Error('HOSTED_FIXTURE_USERS_FAILED'),diagnostics=[];
+  await assert.rejects(async()=>{try{throw original;}finally{await hosted.finalizeHostedChecks(original,async()=>{throw Error('private-sdk-provider-error');},code=>diagnostics.push(code));}},error=>error===original);
+  assert.deepEqual(diagnostics,['HOSTED_FIXTURE_FINALIZATION_FAILED_REVIEW_REQUIRED']);
+  await assert.rejects(()=>hosted.finalizeHostedChecks(null,async()=>{throw Error('private-sdk-provider-error');},code=>diagnostics.push(code)),/HOSTED_FIXTURE_FINALIZATION_FAILED_REVIEW_REQUIRED/);assert.doesNotMatch(JSON.stringify(diagnostics),/private-sdk/);
 });

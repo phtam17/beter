@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile,readdir} from 'node:fs/promises';
 import {PGlite} from '@electric-sql/pglite';
-import {createDataApiDatabase,createAwsAuthStore} from '../server/aws-database.ts';
+import {createDataApiDatabase,createAwsAuthStore,createAwsDatabaseBackend} from '../server/aws-database.ts';
 const bootstrap=await readFile(new URL('../aws/sql/bootstrap.sql',import.meta.url),'utf8').catch(error=>{if(error.code==='ENOENT')return '';throw error;});
 const user='11111111-1111-4111-8111-111111111111';
 const session=(suffix='a')=>({accessHash:suffix.repeat(64),refreshHash:(suffix==='a'?'b':'d').repeat(64),userId:user,sealedTokens:'v1.private-encrypted-payload',accessExpiresAt:Date.now()+3600000,refreshExpiresAt:Date.now()+86400000});
@@ -48,7 +48,7 @@ function transport(db,{allowDuplicateColumns=false}={}){
   return{send:async command=>{
     const kind=command.constructor.name;if(kind==='BeginTransactionCommand'){await db.exec('begin');return{transactionId:'local-transaction'};}if(kind==='CommitTransactionCommand'){await db.exec('commit');return{};}if(kind==='RollbackTransactionCommand'){await db.exec('rollback');return{};}
     const values=[];const mapping=new Map((command.input.parameters||[]).map(p=>[p.name,p]));
-    const sql=command.input.sql.replace(/(?<!:):([a-z][a-z0-9_]*)/g,(match,key)=>{if(!mapping.has(key))return match;const p=mapping.get(key);values.push(p.value.isNull?null:p.value.stringValue??p.value.longValue??p.value.doubleValue??p.value.booleanValue);return'$'+values.length;});
+    const sql=command.input.sql.replace(/(?<!:):([a-z][a-z0-9_]*)/g,(match,key)=>{if(!mapping.has(key))return match;const p=mapping.get(key);values.push(p.value.isNull?null:p.value.stringValue??p.value.longValue??p.value.doubleValue??p.value.booleanValue);const type=p.typeHint==='JSON'?'jsonb':p.value.longValue!==undefined?'bigint':p.value.doubleValue!==undefined?'double precision':p.value.booleanValue!==undefined?'boolean':'text';return'$'+values.length+'::'+type;});
     const result=await db.query(sql,values);const names=result.fields.map(field=>field.name);
     if(!allowDuplicateColumns&&new Set(names).size!==names.length)throw Object.assign(new Error('Duplicate result labels'),{name:'DatabaseErrorException'});
     return{formattedRecords:JSON.stringify(result.rows)};
@@ -60,4 +60,13 @@ test('Data API compatible auth transactions use unique projection labels',async(
 });
 test('Data API scalar chunking preserves a missing private session as null',async()=>{
   const db=await database();try{const store=createAwsAuthStore(dataApi(db,{allowDuplicateColumns:true}));assert.equal(await store.getSessionByAccessHash('a'.repeat(64)),null);}finally{await db.close();}
+});
+test('real Data API text and bigint bindings resolve UUID and integer public RPC signatures',async()=>{
+  const db=await database();try{
+    const dir=new URL('../supabase/migrations/',import.meta.url);for(const name of(await readdir(dir)).filter(n=>/^\d.*\.sql$/.test(n)).sort())await db.exec(await readFile(new URL(name,dir),'utf8'));await db.exec(await readFile(new URL('../aws/sql/finalize.sql',import.meta.url),'utf8'));
+    const api=dataApi(db),store=createAwsAuthStore(api);await store.upsertUser({id:user,email:'typed@example.invalid'});
+    const backend=createAwsDatabaseBackend({database:api,authenticate:async()=>({id:user}),auth:async()=>({})});const portfolio=await backend.rpc('beter_portfolio',{},'user');
+    const history=await backend.rpc('beter_history',{p_portfolio_id:portfolio.id,p_before:null,p_limit:1,p_status:null},'user');assert.ok(history);
+    assert.ok(await backend.rpc('beter_maintenance',{p_batch_size:1},'$service'));assert.ok(await backend.rpc('beter_job_record',{p_name:'typed-binding',p_ok:true,p_detail:{}},'$service'));assert.ok(await backend.rpc('beter_settlement_batch',{p_after:null,p_limit:1},'$service'));
+  }finally{await db.close();}
 });

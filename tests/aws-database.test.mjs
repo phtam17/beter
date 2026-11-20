@@ -41,7 +41,7 @@ test('authenticated RPC verifies the caller before binding transaction-local ide
 test('RPC rejects namespace injection and auth failures before starting a database transaction',async()=>{
   assert.equal(typeof implementation.createAwsDatabaseBackend,'function');let called=0;
   const backend=implementation.createAwsDatabaseBackend({database:{transaction:async()=>{called++;}},authenticate:async()=>{throw Error('Authentication required');},auth:async()=>({})});
-  for(const [name,args] of [['beter_x;drop table auth.users',{}],['other_function',{}],['beter_portfolio',{'p_bad;':1}]])await assert.rejects(()=>backend.rpc(name,args,'user'),/invalid/i);
+  for(const [name,args] of [['beter_x;drop table auth.users',{}],['other_function',{}],['beter_portfolio',{'p_bad;':1}],['beter_unreviewed',{}],['beter_health',{p_unknown:1}]])await assert.rejects(()=>backend.rpc(name,args,'user'),/invalid/i);
   await assert.rejects(()=>backend.rpc('beter_portfolio',{},'bad-user'),/authentication/i);assert.equal(called,0);
 });
 test('anonymous and service RPCs use only their fixed server-selected role, including chunk reassembly',async()=>{
