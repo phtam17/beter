@@ -9,6 +9,18 @@ export function readSettings(env:Record<string,string|undefined>={}) {
   const mode=aws?'aws':env.BETER_BACKEND==='local'&&!production?'local':supabaseConfigured?'supabase':production||hasAnySupabase||env.BETER_BACKEND==='supabase'?'unconfigured':'local';
   const dataMode=env.BETER_DATA_MODE||(mode==='local'?'sample':'live');
   if(!['sample','live'].includes(dataMode))throw new Error('BETER_DATA_MODE must select a valid data mode: sample or live.');
+  const fixedSample=aws&&env.BETER_ENVIRONMENT==='staging'&&dataMode==='sample';
+  const hasSampleSchedule=env.BETER_SAMPLE_START_AT!==undefined||env.BETER_SAMPLE_DURATION_SECONDS!==undefined;
+  if(hasSampleSchedule&&!fixedSample)throw new Error('Sample schedule overrides require explicit AWS staging sample mode.');
+  let sampleStartsAt='';let sampleDurationMs=10_800_000;
+  if(fixedSample){
+    const start=env.BETER_SAMPLE_START_AT||'';const timestamp=Date.parse(start);
+    if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(start)||!Number.isFinite(timestamp)||new Date(timestamp).toISOString().slice(0,19)!==start.slice(0,19))throw new Error('AWS sample start requires a valid UTC ISO timestamp in BETER_SAMPLE_START_AT.');
+    sampleStartsAt=new Date(timestamp).toISOString();
+    const duration=env.BETER_SAMPLE_DURATION_SECONDS??'10800';
+    if(!/^\d+$/.test(duration)||Number(duration)<60||Number(duration)>10800)throw new Error('AWS sample duration must contain an integer from 60 to 10800 seconds.');
+    sampleDurationMs=Number(duration)*1000;
+  }
   if(production&&env.JOB_SECRET&&env.JOB_SECRET.length<32)throw new Error('The production job secret must contain at least 32 characters.');
   const siteUrl=env.SITE_URL||'http://127.0.0.1:4173';
   function safeUrl(value:string|undefined,label:string,originOnly=false){
@@ -46,7 +58,7 @@ export function readSettings(env:Record<string,string|undefined>={}) {
     if((env.BETER_SESSION_SECRET||env.SUPABASE_SERVICE_ROLE_KEY||'').length<32)throw new Error('The production session secret must contain at least 32 characters.');
   }
   const allowedOrigins=(env.ALLOWED_ORIGINS||env.SITE_URL||'').split(',').map(x=>x.trim()).filter(Boolean).map(value=>safeUrl(value,'Allowed origin',true));
-  return {mode,dataMode,production,environment,supabaseConfigured,liveOddsConfigured:Boolean(env.ODDS_API_KEY),
+  return {mode,dataMode,production,environment,supabaseConfigured,liveOddsConfigured:Boolean(env.ODDS_API_KEY),sampleStartsAt,sampleDurationMs,
     jobSecret:env.JOB_SECRET||'',sessionSecret:env.BETER_SESSION_SECRET||env.SUPABASE_SERVICE_ROLE_KEY||'',supabaseUrl:env.SUPABASE_URL||'',supabaseAnonKey:env.SUPABASE_ANON_KEY||'',supabaseServiceKey:env.SUPABASE_SERVICE_ROLE_KEY||'',
     oddsApiKey:env.ODDS_API_KEY||'',bookmaker:env.ODDS_BOOKMAKER||'draftkings',siteUrl,
     supportUrl:safeUrl(env.BETER_SUPPORT_URL,'Support URL'),privacyUrl:safeUrl(env.BETER_PRIVACY_URL,'Privacy URL'),accountDeletionUrl:safeUrl(env.BETER_ACCOUNT_DELETION_URL,'Account deletion URL'),

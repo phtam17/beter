@@ -208,9 +208,13 @@ export function createOddsProvider({ apiKey, bookmaker = 'draftkings', fetchImpl
 }
 
 /** An explicitly synthetic feed for local development; it never calls a real bookmaker. */
-export function createSampleProvider({ now = () => new Date() }: { now?: () => Date } = {}): OddsProvider {
-  const starts = new Date(now().getTime() + 3_600_000);
-  const finalAt = new Date(starts.getTime() + 3 * 3_600_000);
+export function createSampleProvider({now=()=>new Date(),startsAt,durationMs=10_800_000}:{now?:()=>Date;startsAt?:Date;durationMs?:number}={}):OddsProvider {
+  const clock=()=>{const value=now();if(!(value instanceof Date)||!Number.isFinite(value.getTime()))throw new ProviderError('Sample feed requires a valid clock.','sample_invalid_configuration');return value;};
+  const initial=clock();
+  if((startsAt!==undefined&&(!(startsAt instanceof Date)||!Number.isFinite(startsAt.getTime())))||!Number.isSafeInteger(durationMs)||durationMs<60_000||durationMs>10_800_000)throw new ProviderError('Sample feed requires a valid start and duration.','sample_invalid_configuration');
+  const starts=new Date(startsAt?.getTime()??initial.getTime()+3_600_000);
+  const finalAt=new Date(starts.getTime()+durationMs);
+  if(!Number.isFinite(starts.getTime())||!Number.isFinite(finalAt.getTime()))throw new ProviderError('Sample feed requires a valid schedule.','sample_invalid_configuration');
   const fixtures: Record<string, { id: string; home: string; away: string; homeScore: number; awayScore: number; total: number }> = {
     basketball_nba: { id: 'sample-nba-1', home: 'New York Knicks', away: 'Boston Celtics', homeScore: 108, awayScore: 104, total: 224.5 },
     americanfootball_nfl: { id: 'sample-nfl-1', home: 'Buffalo Bills', away: 'Kansas City Chiefs', homeScore: 24, awayScore: 21, total: 47.5 },
@@ -218,22 +222,22 @@ export function createSampleProvider({ now = () => new Date() }: { now?: () => D
   };
   return {
     async getEvents(sport = 'basketball_nba') {
-      sportInfo(sport); const fixture = fixtures[sport]; const clock = now();
+      sportInfo(sport); const fixture = fixtures[sport]; const timestamp = clock();
       const markets = [
         { key: 'h2h', outcomes: [{ name: fixture.away, price: -175 }, { name: fixture.home, price: 150 }] },
         { key: 'spreads', outcomes: [{ name: fixture.away, price: -110, point: -4.5 }, { name: fixture.home, price: -110, point: 4.5 }] },
         { key: 'totals', outcomes: [{ name: 'Over', price: -110, point: fixture.total }, { name: 'Under', price: -110, point: fixture.total }] },
       ];
-      const normalized = normalizeEvent({ id: fixture.id, sport_key: sport, home_team: fixture.home, away_team: fixture.away, commence_time: starts.toISOString(), bookmakers: [{ key: 'sample', last_update: clock.toISOString(), markets }] }, sport, 'sample', clock);
-      if (clock >= finalAt) normalized.status = 'final';
+      const normalized = normalizeEvent({ id: fixture.id, sport_key: sport, home_team: fixture.home, away_team: fixture.away, commence_time: starts.toISOString(), bookmakers: [{ key: 'sample', last_update: timestamp.toISOString(), markets }] }, sport, 'sample', timestamp);
+      if (timestamp >= finalAt) normalized.status = 'final';
       return [normalized];
     },
     async getResults(sport = 'basketball_nba') {
-      sportInfo(sport); const fixture = fixtures[sport]; const completed = now() >= finalAt;
+      sportInfo(sport); const fixture = fixtures[sport]; const timestamp=clock();const completed = timestamp >= finalAt;
       return [normalizeResult({ id: fixture.id, completed, home_team: fixture.home, away_team: fixture.away,
         scores: completed ? [{ name: fixture.home, score: String(fixture.homeScore) }, { name: fixture.away, score: String(fixture.awayScore) }] : null,
         last_update: completed ? finalAt.toISOString() : null,
-      }, now())];
+      }, timestamp)];
     },
   };
 }
