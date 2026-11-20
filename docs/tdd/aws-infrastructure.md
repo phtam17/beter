@@ -62,3 +62,10 @@ The tests cover actual-service response interpretation, unconfirmed SNS subscrip
 The stable sample clock was added after `d147b45` RED → `0c79adb` GREEN. A live-mode regression in `281a48d` then failed because empty/default sample overrides were still passed to live functions; `6cf2ca8` removed both keys through `AWS::NoValue`. Fifteen infrastructure cases pass.
 
 A composed static bundle check with a synthetic valid gate returned byte-exact/MIME-correct content for all ten GET asset requests, empty bodies with correct MIME for all ten HEAD requests, and 200 for `/`. These are local artifact checks. Actual operations reports, SNS confirmation/delivery, CloudWatch extraction, and recovered-database proof must still come from the hosted run.
+
+
+## Signup confirmation code repair
+
+A hosted user received an invalid-link error and remained unconfirmed. No specific root cause was established from that symptom. The confirmation path was changed to an explicit in-app code flow rather than adding unproven OAuth/callback settings. `ec97ec6` recorded two valid failing template checks against the previous link configuration. `30bbe6e` made all sixteen infrastructure checks pass with `CONFIRM_WITH_CODE`, AWS default messages for `COGNITO_DEFAULT`, and custom subject/code body only in the verified SES `HasSes` branch. The original user pool/client/domain relationships and other infrastructure were preserved.
+
+The sender-specific behavior follows [AWS verification template constraints](https://docs.aws.amazon.com/cli/latest/reference/cognito-idp/update-user-pool.html). This template evidence does not by itself prove that the new code was delivered or accepted; the hosted record must include real confirmation and verified account status.
