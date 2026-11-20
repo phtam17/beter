@@ -154,6 +154,15 @@
         "sample",
         "live"
       ]
+    },
+    "EnableReservedConcurrency": {
+      "Type": "String",
+      "Default": "false",
+      "AllowedValues": [
+        "false",
+        "true"
+      ],
+      "Description": "Enable only after verifying the regional Lambda concurrent-executions quota is at least 105 (five reserved plus 100 unreserved). Closed staging supports low-quota new accounts without reservations."
     }
   },
   "Rules": {
@@ -416,6 +425,14 @@
             ""
           ]
         }
+      ]
+    },
+    "UseReservedConcurrency": {
+      "Fn::Equals": [
+        {
+          "Ref": "EnableReservedConcurrency"
+        },
+        "true"
       ]
     }
   },
@@ -1141,7 +1158,15 @@
         },
         "Timeout": 5,
         "MemorySize": 128,
-        "ReservedConcurrentExecutions": 1,
+        "ReservedConcurrentExecutions": {
+          "Fn::If": [
+            "UseReservedConcurrency",
+            1,
+            {
+              "Ref": "AWS::NoValue"
+            }
+          ]
+        },
         "Environment": {
           "Variables": {
             "BETER_LAUNCH_OPEN": {
@@ -1369,7 +1394,15 @@
         },
         "Timeout": 30,
         "MemorySize": 512,
-        "ReservedConcurrentExecutions": 2,
+        "ReservedConcurrentExecutions": {
+          "Fn::If": [
+            "UseReservedConcurrency",
+            2,
+            {
+              "Ref": "AWS::NoValue"
+            }
+          ]
+        },
         "Environment": {
           "Variables": {
             "NODE_ENV": "production",
@@ -1479,7 +1512,15 @@
         },
         "Timeout": 300,
         "MemorySize": 512,
-        "ReservedConcurrentExecutions": 1,
+        "ReservedConcurrentExecutions": {
+          "Fn::If": [
+            "UseReservedConcurrency",
+            1,
+            {
+              "Ref": "AWS::NoValue"
+            }
+          ]
+        },
         "Environment": {
           "Variables": {
             "NODE_ENV": "production",
@@ -1608,7 +1649,15 @@
         },
         "Timeout": 30,
         "MemorySize": 256,
-        "ReservedConcurrentExecutions": 1,
+        "ReservedConcurrentExecutions": {
+          "Fn::If": [
+            "UseReservedConcurrency",
+            1,
+            {
+              "Ref": "AWS::NoValue"
+            }
+          ]
+        },
         "Environment": {
           "Variables": {
             "NODE_ENV": "production",
