@@ -103,3 +103,4 @@ export async function preSignupHandler<T extends {request?:{userAttributes?:{ema
 }
 
 export const handler=createAwsHandler({workerTask:process.env.BETER_AWS_TASK==='process'?'process':process.env.BETER_AWS_TASK==='monitor'?'monitor':undefined});
+export {providerProbeHandler} from './provider-check.ts';
