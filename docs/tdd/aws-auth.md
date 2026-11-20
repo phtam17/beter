@@ -63,3 +63,11 @@ Focused coverage is recorded by the parent task with the final combined checks. 
 Still required on AWS staging: verify real delivery and confirmation links; correct-password, wrong-password, unconfirmed and recovery-code flows; Cognito token lifetime/settings; GetUser rejection after revocation; opaque cookie behavior across Lambda instances; actual private database roles; and provider/database fault recovery. A successful recovery response requires both provider and local revocation to finish. If either channel fails after the password changes, the adapter returns `PASSWORD_RESET_INCOMPLETE` with explicit advice, and never reports completion. A simultaneous provider-and-database failure needs retry/operator reconciliation and belongs in the hosted incident drill.
 
 No live credentials, actual user email, provider tokens, or session handles are written into this report. No hosted account was created, emailed, or modified by these tests.
+# Closed signup verification addendum
+
+Hosted verification needs to distinguish a closed signup rule from an outage. AWS documents `UserLambdaValidationException` as a user validation exception from the configured Lambda service in the [SignUp API errors](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_SignUp.html). The signup branch alone now converts that provider exception to safe HTTP403 `SIGNUP_UNAVAILABLE`, without exposing the provider message, test allowlist, or email.
+
+- RED `daebdec`: 24 tests executed, 23 pass / 1 fail because closed signup returned503.
+- GREEN `4395991`: same24 tests pass. No local user/session is created for rejected signup.
+- Coverage rerun: `node --test --experimental-test-coverage --test-coverage-include='server/aws-auth.ts' --test-coverage-lines=80 --test-coverage-branches=80 --test-coverage-functions=80 tests/aws-auth.test.mjs`: **100% lines /89.68% branches /96.88% functions**,24 pass.
+
