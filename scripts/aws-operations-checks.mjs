@@ -100,6 +100,10 @@ export async function cleanupBackupRehearsal(options={}){
  if(snap){if(snap.Status!=='deleting')await ctx.call('rds','delete-db-cluster-snapshot',{DBClusterSnapshotIdentifier:item.snapshotId});return summary(item,'SNAPSHOT_DELETING');}
  item.cleanedAt=ctx.now.toISOString();await saveJson(ctx.privateDir,'backup-rehearsal.json',item);return summary(item,'CLEANED');
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
- try{const [action,...flags]=process.argv.slice(2);if(flags.some(flag=>!['--quiescent','--delete-disposable'].includes(flag)))throw Error('Use only the documented rehearsal flags.');const options={quiescent:flags.includes('--quiescent'),deleteDisposable:flags.includes('--delete-disposable')};const run={check:checkHostedOperations,'backup-start':startBackupRehearsal,'backup-advance':advanceBackupRehearsal,'backup-verify':verifyBackupRehearsal,'backup-cleanup':cleanupBackupRehearsal}[action];if(!run)throw Error('Choose check, backup-start, backup-advance, backup-verify, or backup-cleanup.');console.log(JSON.stringify(await run(options)));}catch(error){console.error(JSON.stringify({ok:false,message:error instanceof Error?error.message:'AWS operations check failed.'}));process.exitCode=1;}
+export async function runOperationsCli(args,{writeOutput=line=>process.stdout.write(line+'\n'),...options}={}){
+ const [action,...flags]=args,allowed={check:[],'backup-start':['--quiescent'],'backup-advance':[],'backup-verify':[],'backup-cleanup':['--delete-disposable']};
+ if(!allowed[action]||flags.some(flag=>!allowed[action].includes(flag))){writeOutput(JSON.stringify({ok:false,message:'Choose check, backup-start --quiescent, backup-advance, backup-verify, or backup-cleanup --delete-disposable.'}));return 2;}
+ try{const run={check:checkHostedOperations,'backup-start':startBackupRehearsal,'backup-advance':advanceBackupRehearsal,'backup-verify':verifyBackupRehearsal,'backup-cleanup':cleanupBackupRehearsal}[action];const result=await run({...options,quiescent:flags.includes('--quiescent'),deleteDisposable:flags.includes('--delete-disposable')});writeOutput(JSON.stringify(result));return result.ok===false?1:0;}
+ catch(error){writeOutput(JSON.stringify({ok:false,message:error instanceof Error?error.message:'AWS operations check failed.'}));return 1;}
 }
+if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href)process.exitCode=await runOperationsCli(process.argv.slice(2));
