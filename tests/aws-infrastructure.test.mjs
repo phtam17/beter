@@ -11,7 +11,7 @@ test('AWS staging starts closed, with separate user and origin gates',()=>{
   resource('Distribution');assert.equal(template.Parameters.LaunchOpen.Default,'false');assert.equal(template.Parameters.StagingAuthorizationHash.MinLength,64);const code=JSON.stringify(resource('StagingGate').Properties.FunctionCode);assert.match(code,/sha256/);assert.match(code,/x-beter-staging-access/);assert.doesNotMatch(code,/StagingPassword/);const apiOrigin=resource('Distribution').Properties.DistributionConfig.Origins.find(origin=>origin.Id==='api');assert.equal(apiOrigin.OriginCustomHeaders[0].HeaderName,'x-beter-origin-secret');
 });
 test('static content is private and API forwarding never caches accounts',()=>{
-  const bucket=resource('AssetsBucket').Properties;assert.ok(Object.values(bucket.PublicAccessBlockConfiguration).every(value=>value===true));assert.equal(resource('AssetsOac').Properties.OriginAccessControlConfig.SigningBehavior,'always');const distribution=resource('Distribution').Properties.DistributionConfig;assert.equal(distribution.Enabled,true);assert.equal(distribution.DefaultCacheBehavior.ViewerProtocolPolicy,'redirect-to-https');const api=distribution.CacheBehaviors.find(behavior=>behavior.PathPattern==='/api/*');assert.equal(api.CachePolicyId,'413f1603-3b52-45a9-9a26-24a70246d627');assert.equal(resource('ApiForwardingPolicy').Properties.OriginRequestPolicyConfig.CookiesConfig.CookieBehavior,'all');assert.equal(resource('ApiForwardingPolicy').Properties.OriginRequestPolicyConfig.QueryStringsConfig.QueryStringBehavior,'all');
+  const bucket=resource('AssetsBucket').Properties;assert.ok(Object.values(bucket.PublicAccessBlockConfiguration).every(value=>value===true));assert.equal(resource('AssetsOac').Properties.OriginAccessControlConfig.SigningBehavior,'always');const distribution=resource('Distribution').Properties.DistributionConfig;assert.equal(distribution.Enabled,true);assert.equal(distribution.DefaultCacheBehavior.ViewerProtocolPolicy,'redirect-to-https');const api=distribution.CacheBehaviors.find(behavior=>behavior.PathPattern==='/api/*');assert.equal(api.CachePolicyId,'4135ea2d-6df8-44a3-9df3-4b5a84be39ad');assert.equal(resource('ApiForwardingPolicy').Properties.OriginRequestPolicyConfig.CookiesConfig.CookieBehavior,'all');assert.equal(resource('ApiForwardingPolicy').Properties.OriginRequestPolicyConfig.QueryStringsConfig.QueryStringBehavior,'all');
 });
 test('database has no public ingress and has bounded encrypted capacity and retention',()=>{
   const cluster=resource('DatabaseCluster').Properties;assert.equal(cluster.Engine,'aurora-postgresql');assert.equal(cluster.EnableHttpEndpoint,true);assert.equal(cluster.StorageEncrypted,true);assert.ok(cluster.ServerlessV2ScalingConfiguration);assert.equal(resource('DatabaseWriter').Properties.PubliclyAccessible,false);assert.deepEqual(resource('DatabaseSecurityGroup').Properties.SecurityGroupIngress,[]);assert.ok(cluster.BackupRetentionPeriod);assert.equal(resource('DatabaseCluster').DeletionPolicy,'Snapshot');assert.equal(Object.values(template.Resources).some(r=>r.Type==='AWS::EC2::NatGateway'),false);
@@ -50,4 +50,11 @@ test('low-quota accounts opt in to concurrency reservations only after a quota r
   }
   assert.ok(resource('ApiStage').Properties.DefaultRouteSettings.ThrottlingBurstLimit<=20);
   assert.ok(resource('ApiStage').Properties.DefaultRouteSettings.ThrottlingRateLimit<=10);
+});
+
+test('both API behaviors reference the documented AWS managed CachingDisabled policy',()=>{
+  // AWS Developer Guide: using-managed-cache-policies.html#managed-cache-policy-caching-disabled
+  const behaviors=resource('Distribution').Properties.DistributionConfig.CacheBehaviors;
+  assert.deepEqual(behaviors.map(behavior=>behavior.PathPattern).sort(),['/api','/api/*']);
+  for(const behavior of behaviors)assert.equal(behavior.CachePolicyId,'4135ea2d-6df8-44a3-9df3-4b5a84be39ad');
 });
