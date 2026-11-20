@@ -32,14 +32,14 @@ test('secret service failures and malformed dedicated secrets return fixed safe 
 test('only future normalized events with actual moneylines contribute to successful counts',async()=>{
   const live=raw();live.commence_time='2026-11-20T01:00:00Z';const noBook=raw();noBook.bookmakers=[];
   const f=fixture({fetchImpl:async()=>response([raw(),live,noBook])});assert.equal((await f.probe(event)).eventCount,1);
-  for(const records of [[],[live],[noBook]]){const f=fixture({fetchImpl:async()=>response(records)});assert.deepEqual(await f.probe(event),{ok:false,code:'NO_FUTURE_MONEYLINES'});}
+  for(const records of [[],[live],[noBook]]){const f=fixture({fetchImpl:async()=>response(records)});assert.deepEqual(await f.probe(event),{ok:false,code:'NO_FUTURE_MONEYLINES',quota:{remaining:497,used:3,lastCost:3}});}
 });
 test('malformed odds and upstream failures cannot leak provider responses, errors, URLs, or keys',async()=>{
   const malformed=raw();malformed.bookmakers[0].markets[0].outcomes[0].price=1;
-  for(const [fetcher,code]of [[async()=>response([malformed]),'PROVIDER_INVALID_DATA'],[async()=>new Response(apiKey,{status:429}),'PROVIDER_RATE_LIMITED'],[async()=>new Response(apiKey,{status:503}),'PROVIDER_UNAVAILABLE'],[async()=>{throw Error('https://private.example/?apiKey='+apiKey);},'PROVIDER_UNAVAILABLE']]){const f=fixture({fetchImpl:fetcher});assert.deepEqual(await f.probe(event),{ok:false,code});}
+  for(const [fetcher,code,quota]of [[async()=>response([malformed]),'PROVIDER_INVALID_DATA',{remaining:497,used:3,lastCost:3}],[async()=>new Response(apiKey,{status:429}),'PROVIDER_RATE_LIMITED'],[async()=>new Response(apiKey,{status:503}),'PROVIDER_UNAVAILABLE'],[async()=>{throw Error('https://private.example/?apiKey='+apiKey);},'PROVIDER_UNAVAILABLE']]){const f=fixture({fetchImpl:fetcher});assert.deepEqual(await f.probe(event),{ok:false,code,...(quota?{quota}:{})});}
 });
 test('quota output accepts only nonnegative safe integer header values',async()=>{
-  for(const headers of [{'x-requests-remaining':''},{'x-requests-used':'-1'},{'x-requests-last':'0.5'},{'x-requests-remaining':apiKey},{'x-requests-used':'999999999999999999999'}]){const f=fixture({fetchImpl:async()=>response([raw()],headers)});assert.deepEqual(await f.probe(event),{ok:false,code:'QUOTA_INVALID'});}
+  for(const [headers,quota]of [[{'x-requests-remaining':''},{used:3,lastCost:3}],[{'x-requests-used':'-1'},{remaining:497,lastCost:3}],[{'x-requests-last':'0.5'},{remaining:497,used:3}],[{'x-requests-remaining':apiKey},{used:3,lastCost:3}],[{'x-requests-used':'999999999999999999999'},{remaining:497,lastCost:3}]]){const f=fixture({fetchImpl:async()=>response([raw()],headers)});assert.deepEqual(await f.probe(event),{ok:false,code:'QUOTA_INVALID',quota});}
   const f=fixture({fetchImpl:async()=>response([raw()],{'x-requests-remaining':'0'})});assert.equal((await f.probe(event)).quota.remaining,0);
 });
 test('whole-probe deadline aborts stalled SDK, fetch, and response-body work',async()=>{
@@ -48,4 +48,19 @@ test('whole-probe deadline aborts stalled SDK, fetch, and response-body work',as
 });
 test('provider probe is an explicit export separate from the public API handler',async()=>{
   const handler=await import('../aws/handler.ts');assert.equal(typeof handler.providerProbeHandler,'function');assert.notEqual(handler.providerProbeHandler,handler.handler);
+});
+test('provider HTTP failures distinguish invalid key, exhausted quota, denied access and rate limits with numeric quota only',async()=>{
+  for(const [status,code]of [[401,'PROVIDER_KEY_INVALID'],[402,'PROVIDER_QUOTA_EXHAUSTED'],[403,'PROVIDER_ACCESS_DENIED'],[429,'PROVIDER_RATE_LIMITED'],[503,'PROVIDER_UNAVAILABLE']]){
+    const f=fixture({fetchImpl:async()=>new Response('private provider response '+apiKey,{status,headers:{'x-requests-remaining':'0','x-requests-used':'500','x-requests-last':'3'}})});
+    const result=await f.probe(event);assert.deepEqual(result,{ok:false,code,quota:{remaining:0,used:500,lastCost:3}});assert.doesNotMatch(JSON.stringify(result),/private|https|apiKey|secret/);
+  }
+});
+test('failed requests retain partial numeric quota and discard missing or untrusted values',async()=>{
+  const f=fixture({fetchImpl:async()=>new Response(apiKey,{status:401,headers:{'x-requests-remaining':'0','x-requests-used':apiKey}})});
+  assert.deepEqual(await f.probe(event),{ok:false,code:'PROVIDER_KEY_INVALID',quota:{remaining:0}});
+  const absent=fixture({fetchImpl:async()=>new Response(apiKey,{status:401})});assert.deepEqual(await absent.probe(event),{ok:false,code:'PROVIDER_KEY_INVALID'});
+});
+test('a successful HTTP response with malformed provider data remains an invalid-data failure with captured quota',async()=>{
+  const f=fixture({fetchImpl:async()=>new Response('private invalid JSON '+apiKey,{headers:{'x-requests-remaining':'497','x-requests-used':'3','x-requests-last':'3'}})});
+  assert.deepEqual(await f.probe(event),{ok:false,code:'PROVIDER_INVALID_DATA',quota:{remaining:497,used:3,lastCost:3}});
 });
