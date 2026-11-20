@@ -77,7 +77,7 @@ test('AWS sample timing stays fixed across API worker and monitor cold starts wi
 
 test('live provider functions omit every sample override instead of passing empty or default values',()=>{
  assert.deepEqual(template.Conditions.IsSampleData,{'Fn::Equals':[{Ref:'DataMode'},'sample']});
- for(const name of ['ApiFunction','WorkerFunction','MonitorFunction'])for(const key of ['BETER_SAMPLE_START_AT','BETER_SAMPLE_DURATION_SECONDS'])assert.deepEqual(resource(name).Properties.Environment.Variables[key]['Fn::If']?.[2],{Ref:'AWS::NoValue'});
+ for(const name of ['ApiFunction','WorkerFunction','MonitorFunction'])for(const key of ['BETER_SAMPLE_START_AT','BETER_SAMPLE_DURATION_SECONDS','BETER_SAMPLE_REPEAT_SECONDS'])assert.deepEqual(resource(name).Properties.Environment.Variables[key]['Fn::If']?.[2],{Ref:'AWS::NoValue'});
 });
 
 test('signup codes use the default Cognito message unless verified SES permits a custom template',()=>{
@@ -96,4 +96,10 @@ test('notification key usage is account scoped for stack alarms and SNS-only for
  const statements=resource('NotificationKey').Properties.KeyPolicy.Statement,delegation=statements.find(s=>s.Sid==='EnableAccountIamDelegation'),cloudwatch=statements.find(s=>s.Principal?.Service==='cloudwatch.amazonaws.com');assert.deepEqual(delegation.Principal.AWS,{'Fn::Sub':'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'});assert.deepEqual(cloudwatch.Action,['kms:GenerateDataKey*','kms:Decrypt']);assert.deepEqual(cloudwatch.Condition.StringEquals['aws:SourceAccount'],{Ref:'AWS::AccountId'});assert.deepEqual(cloudwatch.Condition.ArnLike['aws:SourceArn'],['WorkerHeartbeatAlarm','ReadinessAlarm','ApiErrorsAlarm'].map(name=>({'Fn::Sub':'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:${AWS::StackName}-'+name+'-*'})));assert.ok(statements.every(s=>s.Principal!=='*'));
  const references=[];function refs(value){if(!value||typeof value!=='object')return;if(value.Ref)references.push(value.Ref);if(value['Fn::GetAtt'])references.push(value['Fn::GetAtt'][0]);for(const child of Object.values(value))refs(child);}refs(resource('NotificationKey'));assert.ok(!references.some(name=>['NotificationTopic','RuntimeRole','WorkerHeartbeatAlarm','ReadinessAlarm','ApiErrorsAlarm'].includes(name)),'Key policy must not create a topic/role/alarm dependency cycle.');
  const permission=resource('RuntimeRole').Properties.Policies.flatMap(policy=>policy.PolicyDocument.Statement).find(s=>Array.isArray(s.Action)&&s.Action.includes('kms:Decrypt'));assert.deepEqual(permission.Resource,{'Fn::GetAtt':['NotificationKey','Arn']});assert.deepEqual(permission.Action,['kms:GenerateDataKey*','kms:Decrypt']);assert.deepEqual(permission.Condition.StringEquals['kms:ViaService'],{'Fn::Sub':'sns.${AWS::Region}.amazonaws.com'});assert.deepEqual(permission.Condition.StringEquals['kms:CallerAccount'],{Ref:'AWS::AccountId'});
+});
+
+test('private sample preview can repeat bounded rounds across all runtime functions without live overrides',()=>{
+ assert.deepEqual(template.Parameters.SampleRepeatSeconds,{Type:'Number',Default:21600,MinValue:600,MaxValue:86400,Description:'Private staging sample round interval in seconds; runtime requires at least duration plus 60 seconds. Ignored by live provider.'});
+ for(const name of ['ApiFunction','WorkerFunction','MonitorFunction'])assert.deepEqual(resource(name).Properties.Environment.Variables.BETER_SAMPLE_REPEAT_SECONDS,{'Fn::If':['IsSampleData',{Ref:'SampleRepeatSeconds'},{Ref:'AWS::NoValue'}]});
+ assert.equal(template.Parameters.LaunchOpen.Default,'false');assert.ok(template.Rules.PublicLaunchChecks);
 });
