@@ -114,6 +114,11 @@ test('provider rejection codes map to safe account, code and throttling errors',
   for(const name of ['CodeMismatchException','ExpiredCodeException']){const f=fixture({send:async()=>{throw providerError(name);}});await assert.rejects(()=>f.adapter().auth('confirm',{email,code:'123456',password:'a-new-private-password'}),error=>error.status===400&&error.code==='INVALID_CODE');}
   const limited=fixture({send:async()=>{throw providerError('TooManyRequestsException');}});await assert.rejects(()=>limited.adapter().auth('signin',{email,password:'a-long-private-password'}),error=>error.status===429);
 });
+test('closed signup validation is a safe explicit denial rather than an account outage',async()=>{
+  const f=fixture({send:async()=>{throw providerError('UserLambdaValidationException');}});
+  await assert.rejects(()=>f.adapter().auth('signup',{email,password:'a-long-private-password'}),error=>error.status===403&&error.code==='SIGNUP_UNAVAILABLE'&&!/private|password=|Lambda|cognito-fixture/.test(error.message));
+  assert.equal(f.sessions.size,0);assert.equal(f.users.size,0);
+});
 test('malformed provider sessions and unsupported challenges cannot create application credentials',async()=>{
   for(const result of [{ChallengeName:'SOFTWARE_TOKEN_MFA',Session:'private-challenge'},{AuthenticationResult:{AccessToken:'raw',ExpiresIn:3600}},{AuthenticationResult:{AccessToken:'raw',RefreshToken:'refresh',ExpiresIn:NaN}}]){const f=fixture({send:async()=>result});await assert.rejects(()=>f.adapter().auth('signin',{email,password:'a-long-private-password'}));assert.equal(f.sessions.size,0);}
 });
