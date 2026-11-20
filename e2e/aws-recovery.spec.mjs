@@ -2,7 +2,7 @@ import {test,expect} from '@playwright/test';
 
 test.use({viewport:{width:375,height:812}});
 const email='recovery@example.test',password='a-new-recovery-password';
-async function mockRecovery(page,{confirmError=null,delayConfirm=false,delayRecover=false,legacy=false}={}){
+async function mockRecovery(page,{confirmError=null,confirmStatus=400,delayConfirm=false,delayRecover=false,legacy=false}={}){
   const calls=[];let releaseConfirm,releaseRecover;
   await page.route('**/api/**',async route=>{
     const path=new URL(route.request().url()).pathname;
@@ -17,7 +17,7 @@ async function mockRecovery(page,{confirmError=null,delayConfirm=false,delayReco
       return finish();
     }
     if(path==='/api/auth/confirm'){
-      const finish=()=>confirmError?respond({error:confirmError},400):respond({ok:true});
+      const finish=()=>confirmError?respond({error:confirmError},confirmStatus):respond({ok:true});
       if(delayConfirm){releaseConfirm=finish;return;}
       return finish();
     }
@@ -46,6 +46,8 @@ test('email code recovery fits a narrow screen, accepts paste and leading zero, 
   await expect(page.getByLabel('New password',{exact:true})).toHaveAttribute('autocomplete','new-password');
   await expect(dialog).toContainText('Enter the 6-digit code from your email');
   expect(await dialog.evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);
+  expect(await code.evaluate(node=>node.dispatchEvent(new Event('paste',{bubbles:true,cancelable:true})))).toBe(true);
+  await dialog.screenshot({path:'/tmp/beter-recovery-375.png'});
   await enterConfirmation(page);await page.getByRole('button',{name:'Update password',exact:true}).click();
   await expect(page.getByRole('dialog',{name:'Sign in to Beter',exact:true})).toContainText('Your password has been updated. Sign in with your new password.');
   expect(calls.find(call=>call.path==='/api/auth/confirm').body).toEqual({email,code:'012345',password});
@@ -104,4 +106,41 @@ test('email can be corrected and Supabase link-based recovery remains available'
   await page.getByLabel('New password',{exact:true}).fill(password);
   await page.getByRole('button',{name:'Update password',exact:true}).click();
   await expect(page.getByText('Your password has been updated. Sign in with your new password.',{exact:true})).toBeVisible();
+});
+
+test('closing the code screen clears its secrets and native Escape returns focus to the account opener',async({page})=>{
+  await mockRecovery(page);await requestCode(page);await enterConfirmation(page);
+  await page.keyboard.press('Escape');await expect(page.locator('#auth-dialog')).not.toBeVisible();
+  await expect(page.locator('#auth-code')).toHaveValue('');
+  await expect(page.locator('#auth-password')).toHaveValue('');
+  await expect(page.getByRole('button',{name:'Sign in',exact:true})).toBeFocused();
+});
+
+test('an incomplete remote reset explains the uncertainty and leaves a usable sign-in path',async({page})=>{
+  const message='Your password may have changed. Try signing in with the new password, or request another recovery code.';
+  const {calls}=await mockRecovery(page,{confirmError:{code:'PASSWORD_RESET_INCOMPLETE',message},confirmStatus:503});
+  await requestCode(page);await enterConfirmation(page);await page.getByRole('button',{name:'Update password',exact:true}).click();
+  await expect(page.getByRole('alert')).toContainText(message);
+  await expect(page.getByRole('button',{name:'Update password',exact:true})).toBeEnabled();
+  await page.getByRole('button',{name:'Back to sign in',exact:true}).click();
+  await expect(page.getByRole('dialog',{name:'Sign in to Beter',exact:true})).toBeVisible();
+  expect(calls.filter(call=>call.path==='/api/auth/confirm')).toHaveLength(1);
+  expect(calls.filter(call=>call.path==='/api/auth/signin')).toHaveLength(0);
+});
+
+test('link recovery instructions are preserved when the account service does not request a code',async({page})=>{
+  await mockRecovery(page,{legacy:true});await requestCode(page);
+  await expect(page.getByRole('dialog',{name:'Recover your account',exact:true})).toContainText('Check your email for a recovery link.');
+  await expect(page.getByLabel('Verification code',{exact:true})).toHaveCount(0);
+});
+
+test('the recovery form remains readable and scrollable with doubled text at 375px',async({page})=>{
+  await mockRecovery(page);await requestCode(page);
+  await page.evaluate(()=>document.documentElement.style.fontSize='200%');
+  const dialog=page.getByRole('dialog',{name:'Reset your password',exact:true});
+  expect(await dialog.evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);
+  await page.getByLabel('Verification code',{exact:true}).fill('012345');
+  await page.getByLabel('New password',{exact:true}).fill(password);
+  await page.getByRole('button',{name:'Update password',exact:true}).click();
+  await expect(page.getByRole('dialog',{name:'Sign in to Beter',exact:true})).toContainText('Your password has been updated.');
 });
