@@ -14,6 +14,10 @@ const noStore=response=>/(?:^|,)\s*no-store(?:\s|,|$)/i.test(response.headers.ge
 const cookies=response=>response.headers.getSetCookie?.()||(response.headers.has('set-cookie')?[response.headers.get('set-cookie')]:[]);
 const noCookie=response=>cookies(response).length===0;
 const jsonBody=(response,text)=>{if(!/^application\/json\b/i.test(response.headers.get('content-type')||''))throw failure('INVALID_RESPONSE');try{return JSON.parse(text);}catch{throw failure('INVALID_RESPONSE');}};
+function safeAuthError(response,text,code,message){
+  const value=jsonBody(response,text),error=value?.error;
+  return value&&Object.keys(value).length===1&&error&&Object.keys(error).length===2&&error.code===code&&error.message===message;
+}
 function secureHeaders(response){
   const h=response.headers,csp=h.get('content-security-policy')||'';
   return /(?:^|;)\s*max-age\s*=\s*(\d+)/i.exec(h.get('strict-transport-security')||'')?.[1]>=31536000&&h.get('x-content-type-options')?.toLowerCase()==='nosniff'&&h.get('x-frame-options')?.toUpperCase()==='DENY'&&h.get('referrer-policy')==='strict-origin-when-cross-origin'&&["default-src 'self'","script-src 'self'","object-src 'none'","base-uri 'none'","frame-ancestors 'none'","form-action 'self'"].every(rule=>csp.split(';').some(part=>part.trim()===rule))&&/camera=\(\)/.test(h.get('permissions-policy')||'')&&/microphone=\(\)/.test(h.get('permissions-policy')||'')&&/geolocation=\(\)/.test(h.get('permissions-policy')||'');
@@ -74,8 +78,8 @@ export async function checkAwsHosted({state,fetchImpl=globalThis.fetch,authProbe
     const identifier=String(randomId());if(!/^[0-9a-f-]{36}$/i.test(identifier))throw invalidState();
     const email='launch-probe-'+identifier+'@example.invalid',password='Beter-check-'+randomBytes(24).toString('base64url')+'!';
     const options={method:'POST',headers:{...browser,origin:site,'content-type':'application/json'},body:{email,password}};
-    checks.push(await check('nonexistent-signin',site+'/api/auth/signin',options,(response,text)=>response.status===401&&jsonBody(response,text)?.error?.code==='AUTH_FAILED'&&noStore(response)&&noCookie(response)));
-    checks.push(await check('closed-signup',site+'/api/auth/signup',options,(response,text)=>response.status===403&&jsonBody(response,text)?.error?.code==='SIGNUP_UNAVAILABLE'&&noStore(response)&&noCookie(response)));
+    checks.push(await check('nonexistent-signin',site+'/api/auth/signin',options,(response,text)=>response.status===401&&safeAuthError(response,text,'AUTH_FAILED','Sign in failed. Check your details or confirm your email.')&&noStore(response)&&noCookie(response)));
+    checks.push(await check('closed-signup',site+'/api/auth/signup',options,(response,text)=>response.status===403&&safeAuthError(response,text,'SIGNUP_UNAVAILABLE','Account registration is not available. Contact support or try again later.')&&noStore(response)&&noCookie(response)));
   }
   return{ok:checks.every(check=>check.ok),scope:'closed-staging',publicLaunchReady:false,authProbes,checkedAt,checks};
 }
