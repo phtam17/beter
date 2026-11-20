@@ -17,7 +17,7 @@ async function fixture(t){
   const save=async()=>{await writeFile(join(privateDir,'state.json'),JSON.stringify(state),{mode:0o600});await writeFile(manifestPath,JSON.stringify(manifest));};await save();
   const control={async call(service,operation,input={},extra=[]){calls.push({service,operation,input,extra});if(service==='sts')return{Account:state.accountId};if(operation==='describe-stacks')return{Stacks:[stack]};if(operation==='get-template')return{TemplateBody:JSON.stringify({...template,Description:'previous template'})};if(operation==='update-stack')return{StackId:state.stackId};return{};}};
   const fetchImpl=async(url,options)=>{fetches.push({url,options});return new Response(JSON.stringify({open_bets:0,schema_version:4,ledger_mismatches:0}),{headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});};
-  return{root,privateDir,artifactDir,manifestPath,now,url,state,stack,manifest,template,calls,fetches,save,control,fetchImpl,options(){return{privateDir,manifestPath,now,control,fetchImpl};}};
+  return{root,privateDir,artifactDir,manifestPath,now,url,state,stack,manifest,template,calls,fetches,save,control,fetchImpl,options(){return{privateDir,manifestPath,now,control:this.control,fetchImpl:this.fetchImpl};}};
 }
 const mutations=f=>f.calls.filter(call=>['put-object','update-stack'].includes(call.operation));
 test('closed staging update verifies artifacts, preserves all prior values including NoEcho and epoch, and saves private recovery state',async t=>{
