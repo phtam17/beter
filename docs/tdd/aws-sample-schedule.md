@@ -22,3 +22,13 @@ node --test --experimental-test-coverage --test-coverage-include='server/provide
 ```
 
 Final result: **57 passed,0 failed,0 skipped**. Coverage across provider/config/AWS runtime: **100% lines /95.58% branches /97.50% functions**. `npx tsc --noEmit` passed. Worker tests create separate runtimes before and after the fixed final boundary and observe the same absolute start with upcoming/final ingestion states. No hosted calls were made for this change; actual worker settlement remains a hosted rehearsal check.
+
+## Optional repeating preview rounds
+
+`BETER_SAMPLE_REPEAT_SECONDS` is optional and allowed only for explicit AWS staging sample mode. When present it must be an integer600–86400 and at least the configured duration plus60 seconds. The provider receives `repeatMs`; omitting it preserves all single-round/local behavior. The initial configured round keeps the existing epoch IDs. After the base start, event ingestion offers the next future round, with a distinct epoch ID. Results retain the current and prior cycles whose final time is within72 hours, including the base pending result before its start, so previously accepted bets and provider correction lookups keep matching.
+
+- `3834214`: RED —12 tests executed,6 existing single-round checks passed/6 repeat checks failed.
+- `840e971`: GREEN —39 provider/config/runtime checks passed and TypeScript passed.
+- Broader coverage command above plus `tests/aws-sample-repeat.test.mjs`: **63 passed,0 failed,0 skipped**, **98.24% lines /94.71% branches /95.35% functions** across provider/config/runtime. The focused target does not exercise newly added runtime support-route lines; provider coverage is100% lines.
+
+New tests prove stable IDs across cold factories, unique later cycles across all three sports, exact final-time and72-hour boundaries, at most434 returned results at the minimum repeat interval, invalid interval rejection, and worker settlement of a previously accepted base-round bet while ingesting a future round. No SQL files, migration checksums, or hosted resources changed.
