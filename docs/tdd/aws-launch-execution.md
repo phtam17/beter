@@ -19,10 +19,10 @@ checks; it is not public-launch approval.
 | Support | Real hosted support submission was accepted by encrypted SNS with reference `BTR-6cb9b16b-41b2-4eab-9502-13dc1ee1ca3f`. The owner subsequently confirmed both the support notification and test alert arrived in their Outlook inbox. |
 | Scheduled processing | EventBridge independently runs ingestion, settlement and maintenance; readiness has passed all 10 checks with zero ledger mismatches. An isolated synthetic account's 1,000-cent stake settled as won and reached exactly 1,001,500 cents, matching its accepted quote. No manual worker invocation was used; the owner's account was untouched. |
 | Backup restore | An encrypted snapshot was restored to a separate private Aurora writer. All 15 table schemas/counts, function definitions and migration proof matched. Measured recovery: 968 seconds. Proof SHA-256: `e1ff9d39d6c390d833187ff47b6889caa3cc4fba24d430e89a88322b3e7186d8`. Tagged disposable writer, cluster and snapshot cleanup reached `CLEANED`; the source was preserved. |
-| Encrypted alerts | A controlled API-errors alarm transition produced successful CloudWatch-to-SNS action history and one SNS delivery. The owner confirmed inbox receipt. The alarm was restored to OK with actions enabled. The actual customer encryption key is enabled and rotation is on. |
+| Encrypted alerts | A controlled API-errors alarm transition produced successful CloudWatch-to-SNS action history and one SNS delivery. The owner confirmed inbox receipt. A separate uniquely dimensioned heartbeat alarm then naturally breached after three missing periods and successfully invoked the encrypted SNS action; the temporary alarm was deleted and absence verified. The main API alarm was restored to OK with actions enabled; the main worker alarm and its live metrics were unchanged. The actual customer encryption key is enabled and rotation is on. |
 | Protected operator recovery | On a separate synthetic identity/event, HTTP resolve returned 200, an identical retry applied zero extra outcomes, and resume returned 200 with automation released. One stake and one void restored exactly 1,000,000 cents; audit entry present and global ledger mismatches zero. Fixture selections were disabled afterward; no visible hosted-check fixtures remained. |
 | Code rollback | The prior known-good ZIP `c302625c9cacd1aa64673724bd9390758f6cac7fefdef14d86a0716abeb8cb76` was downloaded from private versioned artifacts and its SHA checked. All 20 embedded public assets matched. It was deployed briefly with the compatible schema/session configuration preserved, passed all 10 readiness checks, then the current `c67bfb96c5d72ebe142b9a3d7dc2c0c76c841fa91bdb1519a59d1838dc9ca0d4` release was restored and passed the same checks. No password or session-secret change. |
-| Funding cutoff | A temporary IAM-only function with an expired cutoff and launch flag true rejected the API, public gateway, static assets and signup before runtime access. No extra provider call was made. Its function, role, policy and logs were removed; its dedicated secret is scheduled for deletion with seven-day recovery. |
+| Funding cutoff | Temporary IAM-only functions with an expired cutoff rejected the API, public gateway, static assets, signup, scheduled process and scheduled monitor before runtime access. The two scheduled tasks used a role with no permissions; denied log/metric writes prevented false main-environment failure metrics. No extra provider call was made. Temporary functions, roles, policy and logs were removed; the dedicated probe secret is scheduled for deletion with seven-day recovery. |
 | Final release inventory | All five stack Lambda functions report Active, LastUpdateStatus Successful and the current artifact's code SHA. CloudFormation is UPDATE_COMPLETE; public opening and hosted approval remain false. |
 | Local verification | Build/typecheck passed. Latest complete Node run: 549/549 passed, 99.15% lines, 92.45% branches and 98.73% functions. |
 
@@ -73,17 +73,13 @@ support and infrastructure records.
    and protected-branch deployment have not been verified. The local workflow
    and checks are present.
 
-Additional hosted failure-mode verification remains explicit: the scheduled
-handler's cutoff is covered locally, but was not invoked on the temporary
-function because it would emit a failure into the main staging metrics.
-The controlled alarm proved encrypted notification delivery; a deliberately
-missing worker heartbeat has not been rehearsed. Actual database auto-pause
-and resume have not been observed: a complete 24-hour source/writer RDS event
+Actual database auto-pause and resume still require an idle-window verification:
+a complete 24-hour source/writer RDS event
 lookup contained no such event, and 81 actual one-minute capacity samples ranged
 from 0.5 to 1 ACU with no zero samples. Missing datapoints were not counted as
 zero. Minimum zero and 600-second auto-pause are verified configuration, not
-measured pause evidence. Complete these isolated
-failure/idle-window checks before setting `HostedChecksApproved=true`.
+measured pause evidence. Complete this idle-window check before setting
+`HostedChecksApproved=true`.
 
 ## Funding and access
 
