@@ -4,11 +4,16 @@ Beter’s default AWS deployment uses the free AWS-generated HTTP API HTTPS host
 
 This is a deployment runbook, not evidence of a completed launch. Retain the actual hosted check results before changing `LaunchOpen`.
 
+The [November 20 hosted execution report](tdd/aws-launch-execution.md) records
+the deployed private preview, executed recovery checks, and external launch
+gates. Use that report for observed results rather than inferring completion
+from this runbook.
+
 ## Funding and staging limits
 
 This managed design exceeds a $10 monthly cash budget without credits. At the example Aurora price of $0.12 per ACU-hour, a continuously active 0.5 ACU writer alone costs approximately $43.80 per 730-hour month, before storage, I/O, backups, and other services. Exact costs depend on region and usage. Verify current [Aurora pricing](https://aws.amazon.com/rds/aurora/pricing/) and eligible account credits before each deployment or extension.
 
-The operator verified approximately $217.06 of eligible credits on November 20, 2026, with the earliest reported expiry on September 30, 2027. These are dated observations, not a future balance guarantee. The initial review cutoff is November 27, 2026 at 23:59:59 UTC, or the earlier cutoff recorded in the private reviewed deployment plan. Keep the $10 monthly out-of-pocket ceiling and recheck account charges, credit eligibility, and credit expiry before extending that window.
+The operator verified approximately $217.06 of eligible credits on November 20, 2026, with the earliest reported expiry on September 30, 2027. These are dated observations, not a future balance guarantee. The initial deployed review cutoff is November 27, 2026 at 22:46:31 UTC. Keep the $10 monthly out-of-pocket ceiling and recheck account charges, credit eligibility, and credit expiry before extending that window.
 
 The template requires `CreditsVerified=true` and a nonempty `CreditCutoffAt` in UTC, formatted `YYYY-MM-DDTHH:mm:ss`. Aurora defaults to minimum 0 ACU, maximum 1 ACU, and a ten-minute auto-pause interval. Confirm the exact engine version supports scale to zero and Data API in the chosen region. Every-minute worker and readiness schedules remain `DISABLED` until migrations and a bounded hosted check window are ready. Active schedules can prevent auto-pause; minimum 0 is not evidence of a zero compute bill. See the [Aurora auto-pause documentation](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2-auto-pause.html).
 

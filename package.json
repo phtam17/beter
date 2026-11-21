@@ -21,7 +21,8 @@
     "aws:check": "node scripts/aws-hosted-checks.mjs",
     "aws:ops": "node scripts/aws-operations-checks.mjs",
     "test:aws:postgres": "node --test tests/aws-auth-race.integration.mjs",
-    "test:aws:scram": "node --test tests/aws-scram.integration.mjs"
+    "test:aws:scram": "node --test tests/aws-scram.integration.mjs",
+    "aws:update": "node scripts/aws-update.mjs"
   },
   "engines": {
     "node": ">=22.18.0"

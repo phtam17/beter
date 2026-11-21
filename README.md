@@ -45,6 +45,7 @@ The coverage command enforces 80% lines, branches, and functions across backend 
 ## Setup and evidence
 
 - [AWS deployment and account configuration](docs/AWS-DEPLOYMENT.md)
+- [Executed AWS checks and remaining launch gates](docs/tdd/aws-launch-execution.md)
 - [Hosted database verification](docs/tdd/aws-hosted-database.md)
 - [AWS password recovery](docs/tdd/aws-recovery.md)
 - [TDD evidence](docs/releases/2.0.0/infrastructure.tdd.md)
