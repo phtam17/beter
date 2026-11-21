@@ -10,9 +10,9 @@ export function readSettings(env:Record<string,string|undefined>={}) {
   const dataMode=env.BETER_DATA_MODE||(mode==='local'?'sample':'live');
   if(!['sample','live'].includes(dataMode))throw new Error('BETER_DATA_MODE must select a valid data mode: sample or live.');
   const fixedSample=aws&&env.BETER_ENVIRONMENT==='staging'&&dataMode==='sample';
-  const hasSampleSchedule=env.BETER_SAMPLE_START_AT!==undefined||env.BETER_SAMPLE_DURATION_SECONDS!==undefined;
+  const hasSampleSchedule=env.BETER_SAMPLE_START_AT!==undefined||env.BETER_SAMPLE_DURATION_SECONDS!==undefined||env.BETER_SAMPLE_REPEAT_SECONDS!==undefined;
   if(hasSampleSchedule&&!fixedSample)throw new Error('Sample schedule overrides require explicit AWS staging sample mode.');
-  let sampleStartsAt='';let sampleDurationMs=10_800_000;
+  let sampleStartsAt='';let sampleDurationMs=10_800_000;let sampleRepeatMs:number|undefined;
   if(fixedSample){
     const start=env.BETER_SAMPLE_START_AT||'';const timestamp=Date.parse(start);
     if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(start)||!Number.isFinite(timestamp)||new Date(timestamp).toISOString().slice(0,19)!==start.slice(0,19))throw new Error('AWS sample start requires a valid UTC ISO timestamp in BETER_SAMPLE_START_AT.');
@@ -20,6 +20,11 @@ export function readSettings(env:Record<string,string|undefined>={}) {
     const duration=env.BETER_SAMPLE_DURATION_SECONDS??'10800';
     if(!/^\d+$/.test(duration)||Number(duration)<60||Number(duration)>10800)throw new Error('AWS sample duration must contain an integer from 60 to 10800 seconds.');
     sampleDurationMs=Number(duration)*1000;
+    if(env.BETER_SAMPLE_REPEAT_SECONDS!==undefined){
+      const repeat=env.BETER_SAMPLE_REPEAT_SECONDS;
+      if(!/^\d+$/.test(repeat)||Number(repeat)<600||Number(repeat)>86400||Number(repeat)*1000<sampleDurationMs+60_000)throw new Error('AWS sample repeat must be an integer from 600 to 86400 seconds and at least duration plus 60 seconds.');
+      sampleRepeatMs=Number(repeat)*1000;
+    }
   }
   if(production&&env.JOB_SECRET&&env.JOB_SECRET.length<32)throw new Error('The production job secret must contain at least 32 characters.');
   const siteUrl=env.SITE_URL||'http://127.0.0.1:4173';
@@ -59,7 +64,7 @@ export function readSettings(env:Record<string,string|undefined>={}) {
     if((env.BETER_SESSION_SECRET||env.SUPABASE_SERVICE_ROLE_KEY||'').length<32)throw new Error('The production session secret must contain at least 32 characters.');
   }
   const allowedOrigins=(env.ALLOWED_ORIGINS||env.SITE_URL||'').split(',').map(x=>x.trim()).filter(Boolean).map(value=>safeUrl(value,'Allowed origin',true));
-  return {mode,dataMode,production,environment,supabaseConfigured,liveOddsConfigured:Boolean(env.ODDS_API_KEY),sampleStartsAt,sampleDurationMs,
+  return {mode,dataMode,production,environment,supabaseConfigured,liveOddsConfigured:Boolean(env.ODDS_API_KEY),sampleStartsAt,sampleDurationMs,sampleRepeatMs,
     jobSecret:env.JOB_SECRET||'',sessionSecret:env.BETER_SESSION_SECRET||env.SUPABASE_SERVICE_ROLE_KEY||'',supabaseUrl:env.SUPABASE_URL||'',supabaseAnonKey:env.SUPABASE_ANON_KEY||'',supabaseServiceKey:env.SUPABASE_SERVICE_ROLE_KEY||'',
     oddsApiKey:env.ODDS_API_KEY||'',bookmaker:env.ODDS_BOOKMAKER||'draftkings',siteUrl,
     supportTopicArn:env.BETER_SUPPORT_TOPIC_ARN||'',

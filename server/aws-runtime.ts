@@ -41,7 +41,7 @@ export async function createAwsRuntime({env=process.env,secretsClient,dataApiCli
     const cognito=cognitoClient||new CognitoIdentityProviderClient({region:settings.awsRegion,maxAttempts:2});if(!cognitoClient)ownedClients.push(cognito as CognitoIdentityProviderClient);
     const auth=createCognitoAuthBackend({region:settings.awsRegion,clientId:settings.cognitoClientId,store:createAwsAuthStore(database),secret:settings.sessionSecret,client:cognito,now});
     const backend=createAwsDatabaseBackend({database,...auth});
-    const provider=injectedProvider||(settings.dataMode==='sample'?createSampleProvider({now,startsAt:new Date(settings.sampleStartsAt),durationMs:settings.sampleDurationMs}):createOddsProvider({apiKey:settings.oddsApiKey,bookmaker:settings.bookmaker}));
+    const provider=injectedProvider||(settings.dataMode==='sample'?createSampleProvider({now,startsAt:new Date(settings.sampleStartsAt),durationMs:settings.sampleDurationMs,repeatMs:settings.sampleRepeatMs}):createOddsProvider({apiKey:settings.oddsApiKey,bookmaker:settings.bookmaker}));
     let running:Promise<unknown>|null=null;let closing:Promise<void>|null=null;
     const runJobs=async()=>{
       if(closing)throw new ApiFault(503,'RUNTIME_CLOSED','The application services are closed.');

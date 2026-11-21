@@ -208,37 +208,47 @@ export function createOddsProvider({ apiKey, bookmaker = 'draftkings', fetchImpl
 }
 
 /** An explicitly synthetic feed for local development; it never calls a real bookmaker. */
-export function createSampleProvider({now=()=>new Date(),startsAt,durationMs=10_800_000}:{now?:()=>Date;startsAt?:Date;durationMs?:number}={}):OddsProvider {
+export function createSampleProvider({now=()=>new Date(),startsAt,durationMs=10_800_000,repeatMs}:{now?:()=>Date;startsAt?:Date;durationMs?:number;repeatMs?:number}={}):OddsProvider {
   const clock=()=>{const value=now();if(!(value instanceof Date)||!Number.isFinite(value.getTime()))throw new ProviderError('Sample feed requires a valid clock.','sample_invalid_configuration');return value;};
   const initial=clock();
   if((startsAt!==undefined&&(!(startsAt instanceof Date)||!Number.isFinite(startsAt.getTime())))||!Number.isSafeInteger(durationMs)||durationMs<60_000||durationMs>10_800_000)throw new ProviderError('Sample feed requires a valid start and duration.','sample_invalid_configuration');
+  if(repeatMs!==undefined&&(!Number.isSafeInteger(repeatMs)||repeatMs<600_000||repeatMs>86_400_000||repeatMs<durationMs+60_000))throw new ProviderError('Sample feed requires a valid repeat interval after the event duration.','sample_invalid_configuration');
   const starts=new Date(startsAt?.getTime()??initial.getTime()+3_600_000);
   const finalAt=new Date(starts.getTime()+durationMs);
   if(!Number.isFinite(starts.getTime())||!Number.isFinite(finalAt.getTime()))throw new ProviderError('Sample feed requires a valid schedule.','sample_invalid_configuration');
-  const epoch=startsAt===undefined?'':'-'+starts.getTime();
   const fixtures: Record<string, { id: string; home: string; away: string; homeScore: number; awayScore: number; total: number }> = {
-    basketball_nba: { id: 'sample-nba-1'+epoch, home: 'New York Knicks', away: 'Boston Celtics', homeScore: 108, awayScore: 104, total: 224.5 },
-    americanfootball_nfl: { id: 'sample-nfl-1'+epoch, home: 'Buffalo Bills', away: 'Kansas City Chiefs', homeScore: 24, awayScore: 21, total: 47.5 },
-    icehockey_nhl: { id: 'sample-nhl-1'+epoch, home: 'Boston Bruins', away: 'New York Rangers', homeScore: 3, awayScore: 2, total: 5.5 },
+    basketball_nba: { id: 'sample-nba-1', home: 'New York Knicks', away: 'Boston Celtics', homeScore: 108, awayScore: 104, total: 224.5 },
+    americanfootball_nfl: { id: 'sample-nfl-1', home: 'Buffalo Bills', away: 'Kansas City Chiefs', homeScore: 24, awayScore: 21, total: 47.5 },
+    icehockey_nhl: { id: 'sample-nhl-1', home: 'Boston Bruins', away: 'New York Rangers', homeScore: 3, awayScore: 2, total: 5.5 },
   };
+  const roundStart=(index:number)=>{const date=new Date(starts.getTime()+index*(repeatMs||0));if(!Number.isFinite(date.getTime())||!Number.isFinite(date.getTime()+durationMs)||Math.abs(date.getTime()+durationMs)>8.64e15)throw new ProviderError('Sample feed requires a valid round schedule.','sample_invalid_configuration');return date;};
+  const roundId=(id:string,date:Date)=>id+(startsAt===undefined&&repeatMs===undefined?'':'-'+date.getTime());
   return {
     async getEvents(sport = 'basketball_nba') {
       sportInfo(sport); const fixture = fixtures[sport]; const timestamp = clock();
+      const upcoming=repeatMs===undefined?starts:roundStart(Math.max(0,Math.floor((timestamp.getTime()-starts.getTime())/repeatMs)+1));
       const markets = [
         { key: 'h2h', outcomes: [{ name: fixture.away, price: -175 }, { name: fixture.home, price: 150 }] },
         { key: 'spreads', outcomes: [{ name: fixture.away, price: -110, point: -4.5 }, { name: fixture.home, price: -110, point: 4.5 }] },
         { key: 'totals', outcomes: [{ name: 'Over', price: -110, point: fixture.total }, { name: 'Under', price: -110, point: fixture.total }] },
       ];
-      const normalized = normalizeEvent({ id: fixture.id, sport_key: sport, home_team: fixture.home, away_team: fixture.away, commence_time: starts.toISOString(), bookmakers: [{ key: 'sample', last_update: timestamp.toISOString(), markets }] }, sport, 'sample', timestamp);
-      if (timestamp >= finalAt) normalized.status = 'final';
+      const normalized = normalizeEvent({ id: roundId(fixture.id,upcoming), sport_key: sport, home_team: fixture.home, away_team: fixture.away, commence_time: upcoming.toISOString(), bookmakers: [{ key: 'sample', last_update: timestamp.toISOString(), markets }] }, sport, 'sample', timestamp);
+      if (repeatMs===undefined&&timestamp >= finalAt) normalized.status = 'final';
       return [normalized];
     },
     async getResults(sport = 'basketball_nba') {
-      sportInfo(sport); const fixture = fixtures[sport]; const timestamp=clock();const completed = timestamp >= finalAt;
-      return [normalizeResult({ id: fixture.id, completed, home_team: fixture.home, away_team: fixture.away,
-        scores: completed ? [{ name: fixture.home, score: String(fixture.homeScore) }, { name: fixture.away, score: String(fixture.awayScore) }] : null,
-        last_update: completed ? finalAt.toISOString() : null,
-      }, timestamp)];
+      sportInfo(sport); const fixture = fixtures[sport]; const timestamp=clock();
+      const latest=repeatMs===undefined?0:Math.max(0,Math.floor((timestamp.getTime()-starts.getTime())/repeatMs));
+      const earliest=repeatMs===undefined?0:Math.max(0,Math.ceil((timestamp.getTime()-72*3_600_000-durationMs-starts.getTime())/repeatMs));
+      const results:SportsResult[]=[];
+      for(let index=latest;index>=earliest;index--){
+        const date=roundStart(index),end=new Date(date.getTime()+durationMs),completed=timestamp>=end;
+        results.push(normalizeResult({id:roundId(fixture.id,date),completed,home_team:fixture.home,away_team:fixture.away,
+          scores:completed?[{name:fixture.home,score:String(fixture.homeScore)},{name:fixture.away,score:String(fixture.awayScore)}]:null,
+          last_update:completed?end.toISOString():null,
+        },timestamp));
+      }
+      return results;
     },
   };
 }
